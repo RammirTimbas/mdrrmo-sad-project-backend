@@ -3,6 +3,9 @@ const admin = require("firebase-admin");
 const cors = require("cors");
 const app = express();
 const bcrypt = require("bcrypt");
+const bodyParser = require("body-parser");
+const crypto = require("crypto");
+const emailjs = require("emailjs-com");
 const {
   getStorage,
   ref,
@@ -12,12 +15,12 @@ const {
 const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
-
+app.use(bodyParser.json());
 
 const allowedOrigins = [
   process.env.REACT_APP_ORIGIN,
-  'https://mdrrmo---tpms.web.app',
-  'http://localhost:3000'
+  "https://mdrrmo---tpms.web.app",
+  "http://localhost:3000",
 ];
 
 //caching
@@ -26,23 +29,22 @@ let ratedtrainingProgramsCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 5 * 60 * 1000;
 
+app.options("*", cors());
 
-app.options('*', cors());
-
-app.use(cors({
-  origin: function (origin, callback) {
-    console.log('Incoming Origin:', origin); // Add this line to debug
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true); // Allow request
-    } else {
-      callback(new Error('Not allowed by CORS')); // Block request
-    }
-  },
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
-
-
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      console.log("Incoming Origin:", origin); // Add this line to debug
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true); // Allow request
+      } else {
+        callback(new Error("Not allowed by CORS")); // Block request
+      }
+    },
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 app.use(express.json());
 const serviceAccount = require("./firebase-adminsdk.json");
@@ -55,7 +57,6 @@ admin.initializeApp({
 const db = admin.firestore();
 const storage = admin.storage();
 const bucket = storage.bucket();
-
 
 // ENGAGEMENT LAYOUT
 
@@ -131,7 +132,6 @@ app.get("/api/engagements", async (req, res) => {
     res.status(500).json({ error: "Failed to fetch ratings" });
   }
 });
-
 
 // SETTINGS LAYOUT
 
@@ -236,7 +236,6 @@ app.get("/programs", async (req, res) => {
 //TRAINING PROGRAMS VIEW
 
 app.get("/training-programs", async (req, res) => {
-  res.set('Access-Control-Allow-Origin', 'https://mdrrmo---tpms.web.app');
   try {
     const now = Date.now(); // Current time in milliseconds
     const nowSeconds = Math.floor(now / 1000); // Convert to Unix timestamp
@@ -322,10 +321,123 @@ app.get("/api/get-carousel-images", async (req, res) => {
   }
 });
 
+//PASSWORD VERIFY
+
+// Backend: Verify admin password
+app.post("/verify-admin-password", async (req, res) => {
+  const { password } = req.body;
+
+  try {
+    const adminUserId = "X3kBIoe4ugtvz04azO6Q";
+    const adminDocRef = db.collection("Users").doc(adminUserId);
+    const adminDoc = await adminDocRef.get();
+
+    if (adminDoc.exists) {
+      const storedHashedPassword = adminDoc.data().password;
+
+      const passwordMatch = bcrypt.compareSync(password, storedHashedPassword);
+
+      if (passwordMatch) {
+        return res.status(200).json({ verified: true });
+      }
+    }
+
+    return res.status(401).json({ verified: false });
+  } catch (error) {
+    console.error("Error verifying password:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+//FORGOT PASSWORD
+
+const generateCode = () => {
+  return crypto.randomInt(10000000, 99999999).toString(); // 8-digit code
+};
+
+// request password reset
+app.post("/request-password-reset", async (req, res) => {
+  const { email } = req.body;
+
+  //check if the email exists in Firestore
+  const userRef = db.collection("Users").where("email", "==", email);
+  const snapshot = await userRef.get();
+
+  if (snapshot.empty) {
+    return res.status(404).json({ message: "Email not found" });
+  }
+
+  // generate a recovery code and expiration time
+  const recoveryCode = generateCode();
+  const expirationTime = Date.now() + 30 * 60 * 1000; // 30 minutes expiration
+
+  // store the recovery code and expiration in Firestore
+  await db.collection("Users").doc(snapshot.docs[0].id).update({
+    recoveryCode,
+    recoveryCodeExpiration: expirationTime,
+  });
+
+  res.status(200).json({ recoveryCode, email });
+});
+
+// verify the recovery code
+app.post("/verify-recovery-code", async (req, res) => {
+  const { email, code } = req.body;
+
+  // check if email exists and retrieve the stored recovery code
+  const userRef = db.collection("Users").where("email", "==", email);
+  const snapshot = await userRef.get();
+
+  if (snapshot.empty) {
+    return res.status(404).json({ message: "Email not found" });
+  }
+
+  const user = snapshot.docs[0].data();
+  const { recoveryCode, recoveryCodeExpiration } = user;
+
+  // vlidate code and expiration
+  if (recoveryCode !== code || recoveryCodeExpiration < Date.now()) {
+    return res.status(400).json({ message: "Invalid or expired code" });
+  }
+
+  res.status(200).json({ message: "Code verified" });
+});
+
+// reset the password
+app.post("/reset-password", async (req, res) => {
+  const { email, newPassword } = req.body;
+
+  // update password in Firestore
+  // check if the email exists in Firestore
+  const userRef = db.collection("Users").where("email", "==", email);
+  const snapshot = await userRef.get();
+
+  if (snapshot.empty) {
+    return res.status(404).json({ message: "Email not found" });
+  }
+
+  try {
+    // hash the new password
+    const hashedPassword = bcrypt.hashSync(newPassword, 10);
+
+    // update password in Firestore
+    await db.collection("Users").doc(snapshot.docs[0].id).update({
+      password: hashedPassword, 
+      recoveryCode: null, 
+      recoveryCodeExpiration: null,
+    });
+
+    res.status(200).json({ message: "Password reset successfully" });
+  } catch (error) {
+    console.error("Error resetting password:", error);
+    res.status(500).json({ message: "Failed to reset password" });
+  }
+});
+
 const PORT = process.env.PORT;
 const server = http.createServer(app);
 
-// WebSocket server
+// websocket server
 const wss = new WebSocket.Server({ server });
 wss.on("connection", (ws, req) => {
   const origin = req.headers.origin;
@@ -340,7 +452,3 @@ wss.on("connection", (ws, req) => {
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
-/*server.listen(5000, '0.0.0.0', () => {
-  console.log("Server: Backend server is running on port 5000");
-});*/
