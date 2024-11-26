@@ -19,10 +19,10 @@ const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
 
+const server = require('http').createServer(app);
+
 app.use(bodyParser.json());
 
-// Initialize the HTTP server
-const server = http.createServer(app);
 
 // WebSocket server **should be initialized after** HTTP server
 const wss = new WebSocket.Server({ server });
@@ -46,7 +46,6 @@ app.options("/api/*", cors());
 app.use(
   cors({
     origin: function (origin, callback) {
-      console.log("Request headers:", req.headers); // Log request headers for more insight
       console.log("Incoming Origin:", origin); // Log origin
 
       if (!origin || allowedOrigins.includes(origin)) {
