@@ -55,7 +55,6 @@ admin.initializeApp({
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
-console.log(firebaseCredentials); // This will print the parsed credentials object
 
 const db = admin.firestore();
 const storage = admin.storage();
