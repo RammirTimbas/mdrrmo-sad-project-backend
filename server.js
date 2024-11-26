@@ -7,6 +7,7 @@ const bodyParser = require("body-parser");
 const fs = require('fs');
 const crypto = require("crypto");
 const emailjs = require("emailjs-com");
+const path = require('path');
 const {
   getStorage,
   ref,
@@ -456,6 +457,15 @@ app.post("/reset-password", async (req, res) => {
 const PORT = process.env.PORT;
 const server = http.createServer(app);
 
+
+app.get('/', (req, res) => {
+  res.redirect('/api');  // or any other route you'd prefer
+});
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
+});
+
 // websocket server
 const wss = new WebSocket.Server({ server });
 wss.on("connection", (ws, req) => {
@@ -471,3 +481,5 @@ wss.on("connection", (ws, req) => {
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+
