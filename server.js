@@ -18,6 +18,17 @@ const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
 app.use(bodyParser.json());
+const wss = new WebSocket.Server({ server });
+app.use(express.json());
+
+const PORT = process.env.PORT;
+const server = http.createServer(app);
+
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
 
 const allowedOrigins = [
   "https://mdrrmo---tpms.web.app",
@@ -50,8 +61,7 @@ app.use(
 );
 
 
-// websocket server
-const wss = new WebSocket.Server({ server });
+
 wss.on("connection", (ws, req) => {
   const origin = req.headers.origin;
   if (!allowedOrigins.includes(origin)) {
@@ -61,8 +71,8 @@ wss.on("connection", (ws, req) => {
   }
   console.log("WebSocket connection established");
 });
+// websocket server
 
-app.use(express.json());
 //const serviceAccount = require("./firebase-adminsdk.json");
 
 const firebasePrivateKeyB64 = Buffer.from(
@@ -474,12 +484,4 @@ app.post("/reset-password", async (req, res) => {
     console.error("Error resetting password:", error);
     res.status(500).json({ message: "Failed to reset password" });
   }
-});
-
-const PORT = process.env.PORT;
-const server = http.createServer(app);
-
-
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
 });
