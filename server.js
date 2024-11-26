@@ -4,7 +4,6 @@ const cors = require("cors");
 const app = express();
 const bcrypt = require("bcryptjs");
 const bodyParser = require("body-parser");
-const fs = require("fs");
 const crypto = require("crypto");
 const emailjs = require("emailjs-com");
 const path = require("path");
@@ -17,51 +16,20 @@ const {
 
 const PORT = process.env.PORT;
 const http = require("http");
-const server = http.createServer(app);
 const WebSocket = require("ws");
 require("dotenv").config();
+
 app.use(bodyParser.json());
+
+// Initialize the HTTP server
+const server = http.createServer(app);
+
+// WebSocket server **should be initialized after** HTTP server
 const wss = new WebSocket.Server({ server });
-app.use(express.json());
-
-
-
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
-
-
 const allowedOrigins = [
   "https://mdrrmo---tpms.web.app",
   "https://mdrrmo---tpms.firebaseapp.com",
 ];
-
-//caching
-let trainingProgramsCache = null;
-let ratedtrainingProgramsCache = null;
-let cacheTimestamp = null;
-const CACHE_DURATION = 5 * 60 * 1000;
-
-app.options("/api/*", cors());
-
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      console.log('Request headers:', req.headers); // Log request headers for more insight
-      console.log('Incoming Origin:', origin); // Log origin
-
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true); // Allow request
-      } else {
-        callback(new Error('Not allowed by CORS')); // Block request
-      }
-    },
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
-
-
 
 wss.on("connection", (ws, req) => {
   const origin = req.headers.origin;
@@ -72,9 +40,29 @@ wss.on("connection", (ws, req) => {
   }
   console.log("WebSocket connection established");
 });
-// websocket server
 
-//const serviceAccount = require("./firebase-adminsdk.json");
+app.options("/api/*", cors());
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      console.log("Request headers:", req.headers); // Log request headers for more insight
+      console.log("Incoming Origin:", origin); // Log origin
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true); // Allow request
+      } else {
+        callback(new Error("Not allowed by CORS")); // Block request
+      }
+    },
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
 
 const firebasePrivateKeyB64 = Buffer.from(
   process.env.FIREBASE_PRIVATE_KEY_BASE64,
@@ -105,11 +93,16 @@ const db = admin.firestore();
 const storage = admin.storage();
 const bucket = storage.bucket();
 
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+//caching
+let trainingProgramsCache = null;
+let ratedtrainingProgramsCache = null;
+let cacheTimestamp = null;
+const CACHE_DURATION = 5 * 60 * 1000;
 
+app.use((err, req, res, next) => {
+  console.error("Unhandled error:", err);
+  res.status(500).json({ error: "Internal server error" });
+});
 
 // ENGAGEMENT LAYOUT
 
