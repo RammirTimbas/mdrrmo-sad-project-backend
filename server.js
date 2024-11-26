@@ -49,9 +49,22 @@ app.use(
 app.use(express.json());
 //const serviceAccount = require("./firebase-adminsdk.json");
 
+const firebaseCredentials = {
+  type: process.env.FIREBASE_TYPE,
+  projectId: process.env.FIREBASE_PROJECT_ID,
+  privateKeyId: process.env.FIREBASE_PRIVATE_KEY_ID,
+  privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),  // Fixing newlines in privateKey
+  clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+  clientId: process.env.FIREBASE_CLIENT_ID,
+  authUri: process.env.FIREBASE_AUTH_URI,
+  tokenUri: process.env.FIREBASE_TOKEN_URI,
+  authProviderX509CertUrl: process.env.FIREBASE_AUTH_PROVIDER,
+  clientX509CertUrl: process.env.FIREBASE_CLIENT_URL,
+  universeDomain: process.env.FIREBASE_UNIVERSE_DOMAIN,
+};
 
 admin.initializeApp({
-  credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_CREDENTIALS)),
+  credential: admin.credential.cert(firebaseCredentials),
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
