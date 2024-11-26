@@ -4,6 +4,7 @@ const cors = require("cors");
 const app = express();
 const bcrypt = require('bcryptjs');
 const bodyParser = require("body-parser");
+const fs = require('fs');
 const crypto = require("crypto");
 const emailjs = require("emailjs-com");
 const {
@@ -49,15 +50,14 @@ app.use(
 app.use(express.json());
 //const serviceAccount = require("./firebase-adminsdk.json");
 
-const privateKey = process.env.FIREBASE_PRIVATE_KEY
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    : null;
+const firebasePrivateKeyB64 = Buffer.from(process.env.FIREBASE_PRIVATE_KEY_BASE64, 'base64');
+const firebasePrivateKey = firebasePrivateKeyB64.toString('utf8');
 
 const firebaseCredentials = {
   type: process.env.FIREBASE_TYPE,
   projectId: process.env.FIREBASE_PROJECT_ID,
   privateKeyId: process.env.FIREBASE_PRIVATE_KEY_ID,
-  privateKey: privateKey,
+  privateKey: firebasePrivateKey,
   clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
   clientId: process.env.FIREBASE_CLIENT_ID,
   authUri: process.env.FIREBASE_AUTH_URI,
