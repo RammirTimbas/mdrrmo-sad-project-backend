@@ -47,16 +47,15 @@ app.use(
 );
 
 app.use(express.json());
-const serviceAccount = require("./firebase-adminsdk.json");
-
-const firebaseCredentials = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-console.log(firebaseCredentials); // This will print the parsed credentials object
+//const serviceAccount = require("./firebase-adminsdk.json");
 
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert(JSON.parse(process.env.FIREBASE_CREDENTIALS)),
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
+
+console.log(firebaseCredentials); // This will print the parsed credentials object
 
 const db = admin.firestore();
 const storage = admin.storage();
