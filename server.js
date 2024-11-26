@@ -2,12 +2,12 @@ const express = require("express");
 const admin = require("firebase-admin");
 const cors = require("cors");
 const app = express();
-const bcrypt = require('bcryptjs');
+const bcrypt = require("bcryptjs");
 const bodyParser = require("body-parser");
-const fs = require('fs');
+const fs = require("fs");
 const crypto = require("crypto");
 const emailjs = require("emailjs-com");
-const path = require('path');
+const path = require("path");
 const {
   getStorage,
   ref,
@@ -20,9 +20,8 @@ require("dotenv").config();
 app.use(bodyParser.json());
 
 const allowedOrigins = [
-  process.env.REACT_APP_ORIGIN,
   "https://mdrrmo---tpms.web.app",
-  "http://localhost:3000",
+  "https://mdrrmo---tpms.firebaseapp.com",
 ];
 
 //caching
@@ -31,28 +30,46 @@ let ratedtrainingProgramsCache = null;
 let cacheTimestamp = null;
 const CACHE_DURATION = 5 * 60 * 1000;
 
-app.options("*", cors());
+app.options("/api/*", cors());
 
 app.use(
   cors({
     origin: function (origin, callback) {
-      console.log("Incoming Origin:", origin); // Add this line to debug
+      console.log('Request headers:', req.headers); // Log request headers for more insight
+      console.log('Incoming Origin:', origin); // Log origin
+
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true); // Allow request
       } else {
-        callback(new Error("Not allowed by CORS")); // Block request
+        callback(new Error('Not allowed by CORS')); // Block request
       }
     },
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    methods: ['GET', 'POST'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
+
+
+// websocket server
+const wss = new WebSocket.Server({ server });
+wss.on("connection", (ws, req) => {
+  const origin = req.headers.origin;
+  if (!allowedOrigins.includes(origin)) {
+    ws.close();
+    console.log("WebSocket connection rejected due to origin mismatch");
+    return;
+  }
+  console.log("WebSocket connection established");
+});
 
 app.use(express.json());
 //const serviceAccount = require("./firebase-adminsdk.json");
 
-const firebasePrivateKeyB64 = Buffer.from(process.env.FIREBASE_PRIVATE_KEY_BASE64, 'base64');
-const firebasePrivateKey = firebasePrivateKeyB64.toString('utf8');
+const firebasePrivateKeyB64 = Buffer.from(
+  process.env.FIREBASE_PRIVATE_KEY_BASE64,
+  "base64"
+);
+const firebasePrivateKey = firebasePrivateKeyB64.toString("utf8");
 
 const firebaseCredentials = {
   type: process.env.FIREBASE_TYPE,
@@ -73,10 +90,15 @@ admin.initializeApp({
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
-
 const db = admin.firestore();
 const storage = admin.storage();
 const bucket = storage.bucket();
+
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
 
 // ENGAGEMENT LAYOUT
 
@@ -442,8 +464,8 @@ app.post("/reset-password", async (req, res) => {
 
     // update password in Firestore
     await db.collection("Users").doc(snapshot.docs[0].id).update({
-      password: hashedPassword, 
-      recoveryCode: null, 
+      password: hashedPassword,
+      recoveryCode: null,
       recoveryCodeExpiration: null,
     });
 
@@ -458,28 +480,6 @@ const PORT = process.env.PORT;
 const server = http.createServer(app);
 
 
-app.get('/', (req, res) => {
-  res.redirect('/api');  // or any other route you'd prefer
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'client/build', 'index.html'));
-});
-
-// websocket server
-const wss = new WebSocket.Server({ server });
-wss.on("connection", (ws, req) => {
-  const origin = req.headers.origin;
-  if (!allowedOrigins.includes(origin)) {
-    ws.close();
-    console.log("WebSocket connection rejected due to origin mismatch");
-    return;
-  }
-  console.log("WebSocket connection established");
-});
-
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-
-
