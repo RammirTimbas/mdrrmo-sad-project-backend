@@ -14,15 +14,16 @@ const {
   listAll,
   getDownloadURL,
 } = require("firebase-admin/storage");
+
+const PORT = process.env.PORT;
 const http = require("http");
+const server = http.createServer(app);
 const WebSocket = require("ws");
 require("dotenv").config();
 app.use(bodyParser.json());
 const wss = new WebSocket.Server({ server });
 app.use(express.json());
 
-const PORT = process.env.PORT;
-const server = http.createServer(app);
 
 
 server.listen(PORT, () => {
