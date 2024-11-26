@@ -47,8 +47,11 @@ app.use(
 );
 
 app.use(express.json());
-//const serviceAccount = require('./firebase-adminsdk.json');
-const serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+const serviceAccount = require("./firebase-adminsdk.json");
+
+const firebaseCredentials = JSON.parse(process.env.FIREBASE_CREDENTIALS);
+console.log(firebaseCredentials); // This will print the parsed credentials object
+
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
