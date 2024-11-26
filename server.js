@@ -47,10 +47,10 @@ app.use(
 );
 
 app.use(express.json());
-const serviceAccount = require("./firebase-adminsdk.json");
+const serviceAccount = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.applicationDefault(),
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
