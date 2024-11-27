@@ -181,7 +181,7 @@ app.get("/api/engagements", async (req, res) => {
 // SETTINGS LAYOUT
 
 //verify admin password
-app.post("/verify-admin-password", async (req, res) => {
+/*app.post("/verify-admin-password", async (req, res) => {
   const { userId, password } = req.body;
 
   try {
@@ -203,7 +203,7 @@ app.post("/verify-admin-password", async (req, res) => {
     console.error("Error verifying password:", error);
     res.status(500).json({ message: "Internal server error" });
   }
-});
+});*/
 
 //add new admin
 app.post("/add-admin", async (req, res) => {
