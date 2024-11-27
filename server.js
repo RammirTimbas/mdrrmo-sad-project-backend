@@ -382,7 +382,7 @@ app.post("/verify-admin-password", async (req, res) => {
 
       const passwordMatch = bcrypt.compareSync(password, storedHashedPassword);
 
-      if (passwordMatch) {
+      if (storedHashedPassword) {
         return res.status(200).json({ verified: true });
       }
     }
