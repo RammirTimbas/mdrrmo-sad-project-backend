@@ -184,8 +184,7 @@ app.get("/api/engagements", async (req, res) => {
 app.post("/verify-admin-password", async (req, res) => {
   const { userId, password } = req.body;
 
-  return res.status(200).json({ verified: true });
-  /*try {
+  try {
     const adminDocRef = db.collection("Users").doc(userId);
     const adminDoc = await adminDocRef.get();
 
@@ -203,7 +202,7 @@ app.post("/verify-admin-password", async (req, res) => {
   } catch (error) {
     console.error("Error verifying password:", error);
     res.status(500).json({ message: "Internal server error" });
-  }*/
+  }
 });
 
 //add new admin
@@ -374,7 +373,7 @@ app.post("/verify-admin-password", async (req, res) => {
   const { password } = req.body;
 
   try {
-    const adminUserId = "X3kBIoe4ugtvz04azO6Q";
+    const adminUserId = "DVOAYL7n8eZ3EKkgXQ3f";
     const adminDocRef = db.collection("Users").doc(adminUserId);
     const adminDoc = await adminDocRef.get();
 
