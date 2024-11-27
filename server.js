@@ -373,7 +373,7 @@ app.post("/verify-admin-password", async (req, res) => {
   const { password } = req.body;
 
   try {
-    const adminUserId = "X3kBIoe4ugtvz04azO6Q";
+    const adminUserId = "nIhVSIQEXmNajW8rrHDY";
     const adminDocRef = db.collection("Users").doc(adminUserId);
     const adminDoc = await adminDocRef.get();
 
