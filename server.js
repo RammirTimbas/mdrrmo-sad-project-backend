@@ -350,21 +350,29 @@ app.get("/api/user-info/:userId", async (req, res) => {
 app.get("/api/get-carousel-images", async (req, res) => {
   try {
     const [files] = await bucket.getFiles({ prefix: "carousel-images/" }); // List files in the 'carousel-images' folder
+
     const imageUrls = await Promise.all(
-      files.map(async (file) => {
-        const url = await file.getSignedUrl({
-          action: "read",
-          expires: "03-09-2491",
-        }); // Generate signed URL for each file
-        return { name: file.name, url: url[0] };
-      })
+      files
+        .filter((file) => {
+          // Only include files that are images (you can add more extensions if needed)
+          return file.name.match(/\.(jpg|jpeg|png|gif)$/i);
+        })
+        .map(async (file) => {
+          const url = await file.getSignedUrl({
+            action: "read",
+            expires: "03-09-2491", // Expires far in the future
+          });
+          return { name: file.name, url: url[0] };
+        })
     );
+
     res.status(200).json(imageUrls); // Send the image URLs to the frontend
   } catch (error) {
     console.error("Error fetching images:", error);
     res.status(500).json({ error: "Failed to fetch images" });
   }
 });
+
 
 //PASSWORD VERIFY
 
