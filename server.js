@@ -14,21 +14,24 @@ const {
   getDownloadURL,
 } = require("firebase-admin/storage");
 
-const PORT = process.env.PORT;
+const PORT = 5000; // Hardcoded for testing
+
 const http = require("http");
 const WebSocket = require("ws");
 require("dotenv").config();
+const fs = require("fs");
+const ExcelJS = require("exceljs");
 
-const server = require('http').createServer(app);
+const server = require("http").createServer(app);
 
 app.use(bodyParser.json());
 
-
-// WebSocket server **should be initialized after** HTTP server
 const wss = new WebSocket.Server({ server });
 const allowedOrigins = [
   "https://mdrrmo---tpms.web.app",
   "https://mdrrmo---tpms.firebaseapp.com",
+  "http://localhost:3000",
+  "http://localhost:5000",
 ];
 
 wss.on("connection", (ws, req) => {
@@ -59,14 +62,13 @@ app.use(
   })
 );
 
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+const serviceAccount = require("./firebaseCredentials.json");
 
-const firebasePrivateKeyB64 = Buffer.from(
+/*const firebasePrivateKeyB64 = Buffer.from(
   process.env.FIREBASE_PRIVATE_KEY_BASE64,
   "base64"
 );
+
 const firebasePrivateKey = firebasePrivateKeyB64.toString("utf8");
 
 const firebaseCredentials = {
@@ -81,10 +83,10 @@ const firebaseCredentials = {
   authProviderX509CertUrl: process.env.FIREBASE_AUTH_PROVIDER,
   clientX509CertUrl: process.env.FIREBASE_CLIENT_URL,
   universeDomain: process.env.FIREBASE_UNIVERSE_DOMAIN,
-};
+}; */
 
 admin.initializeApp({
-  credential: admin.credential.cert(firebaseCredentials),
+  credential: admin.credential.cert(serviceAccount),
   storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
 });
 
@@ -373,7 +375,6 @@ app.get("/api/get-carousel-images", async (req, res) => {
   }
 });
 
-
 //PASSWORD VERIFY
 
 // Backend: Verify admin password
@@ -485,4 +486,150 @@ app.post("/reset-password", async (req, res) => {
     console.error("Error resetting password:", error);
     res.status(500).json({ message: "Failed to reset password" });
   }
+});
+
+//DASHBOARD
+
+app.get("/api/user-info-gender/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const userCollection = db.collection("User Informations");
+    const querySnapshot = await userCollection
+      .where("user_ID", "==", userId)
+      .get();
+
+    if (!querySnapshot.empty) {
+      const userDoc = querySnapshot.docs[0].data();
+      res
+        .status(200)
+        .json({ full_name: userDoc.full_name, gender: userDoc.gender });
+    } else {
+      res.status(404).json({ message: `No user found for userId: ${userId}` });
+    }
+  } catch (error) {
+    console.error("Error fetching user gender:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+});
+
+app.post("/export-quota-report", async (req, res) => {
+  try {
+    // Get training data from request body
+    const { trainingData } = req.body;
+    if (!trainingData || trainingData.length === 0) {
+      return res.status(400).json({ error: "No training data provided." });
+    }
+
+    // Load the existing Excel template
+    const filePath = path.join(
+      __dirname,
+      "public",
+      "quota_report_template_final.xlsx"
+    );
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+
+    // Get the first worksheet
+    const worksheet = workbook.getWorksheet(1);
+
+    // Insert data starting from row 9
+    let startRow = 9;
+    trainingData.forEach((data, index) => {
+      const row = worksheet.getRow(startRow + index);
+
+      row.getCell(1).value = data["#"]; // Column A: #
+      row.getCell(2).value = data.TRAINING; // Column B: Training
+      row.getCell(3).value = data.LOCATION; // Column C: Location
+      row.getCell(4).value = data.PARTICIPANTS; // Column D: Participants
+      row.getCell(5).value = data["TYPE OF TRAINING"]; // Column E: Type of Training
+      row.getCell(6).value = data["SPECIFIC TRAINING"]; // Column F: Specific Training
+      row.getCell(7).value = data.DATE; // Column G: Date
+      row.getCell(8).value = data.MONTH; // Column H: Month
+      row.getCell(9).value = data.MALE; // Column I: Male
+      row.getCell(10).value = data.FEMALE; // Column J: Female
+      row.getCell(11).value = data.TOTAL; // Column K: Total
+      row.getCell(12).value = data.REMARKS; // Column L: Remarks
+
+      // AutoFit row height based on the longest content
+      const maxTextLength = Math.max(
+        ...Object.values(data).map((value) => value?.toString().length || 0)
+      );
+      row.height = Math.max(15, Math.ceil(maxTextLength / 40) * 20); // Adjust as needed
+
+      row.commit(); // Save the row
+    });
+
+    // Set response headers for file download
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=Quota_Report.xlsx`
+    );
+
+    // Write the modified workbook to response
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error exporting quota report:", error);
+    res.status(500).json({ error: "Failed to generate report" });
+  }
+});
+
+
+app.get("/feedback-wordcloud", async (req, res) => {
+  try {
+    // Serve from cache if valid
+    if (
+      trainingProgramsCache &&
+      cacheTimestamp &&
+      Date.now() - cacheTimestamp < CACHE_DURATION
+    ) {
+      console.log("Serving training programs from cache");
+      return res.status(200).json(trainingProgramsCache);
+    }
+
+    // Fetch all training programs
+    const programsSnapshot = await db.collection("Training Programs").get();
+    const programsData = [];
+
+    for (const programDoc of programsSnapshot.docs) {
+      const programData = { id: programDoc.id, ...programDoc.data(), feedbacks: [] };
+
+      // Fetch feedbacks from the "ratings" subcollection
+      const ratingsSnapshot = await db
+        .collection("Training Programs")
+        .doc(programDoc.id)
+        .collection("ratings")
+        .get();
+
+      ratingsSnapshot.forEach((ratingDoc) => {
+        const ratingData = ratingDoc.data();
+        if (ratingData.feedback) {
+          programData.feedbacks.push(ratingData.feedback);
+        }
+      });
+
+      programsData.push(programData);
+    }
+
+    // Update cache
+    trainingProgramsCache = programsData;
+    cacheTimestamp = Date.now();
+
+    console.log("Serving fresh training programs data and updating cache");
+    res.status(200).json(programsData);
+  } catch (error) {
+    console.error("Error fetching training programs:", error);
+    res.status(500).json({ message: "Failed to fetch training programs" });
+  }
+});
+
+
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
