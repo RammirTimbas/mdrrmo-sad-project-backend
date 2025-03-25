@@ -36,9 +36,16 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(bodyParser.json());
 
+const allowedOrigins = [
+  "https://mdrrmo---tpms.web.app",
+  "https://mdrrmo---tpms.firebaseapp.com",
+  "http://localhost:3000",
+  "http://localhost:5000",
+];
+
 app.use(
   cors({
-    origin: "http://localhost:3000", // Allow frontend origin
+    origin: allowedOrigins, // Allow frontend origin
     credentials: true, // ✅ Important for session authentication
   })
 );
@@ -58,12 +65,7 @@ app.use(
 );
 
 const wss = new WebSocket.Server({ server });
-const allowedOrigins = [
-  "https://mdrrmo---tpms.web.app",
-  "https://mdrrmo---tpms.firebaseapp.com",
-  "http://localhost:3000",
-  "http://localhost:5000",
-];
+
 
 wss.on("connection", (ws, req) => {
   const origin = req.headers.origin;
