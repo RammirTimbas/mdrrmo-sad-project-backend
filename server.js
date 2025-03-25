@@ -7,6 +7,21 @@ const bodyParser = require("body-parser");
 const crypto = require("crypto");
 const emailjs = require("emailjs-com");
 const path = require("path");
+const fs = require("fs");
+const PizZip = require("pizzip");
+const Docxtemplater = require("docxtemplater");
+const { google } = require("googleapis");
+const session = require("express-session");
+const router = express.Router();
+const http = require("http");
+const WebSocket = require("ws");
+const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+require("dotenv").config();
+const server = require("http").createServer(app);
+require("dotenv").config();
+const ExcelJS = require("exceljs");
+
 const {
   getStorage,
   ref,
@@ -16,15 +31,32 @@ const {
 
 const PORT = 5000; // Hardcoded for testing
 
-const http = require("http");
-const WebSocket = require("ws");
-require("dotenv").config();
-const fs = require("fs");
-const ExcelJS = require("exceljs");
-
-const server = require("http").createServer(app);
-
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 app.use(bodyParser.json());
+
+app.use(
+  cors({
+    origin: "http://localhost:3000", // Allow frontend origin
+    credentials: true, // ✅ Important for session authentication
+  })
+);
+
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "your_secret_key",
+    resave: false, // Prevents re-saving sessions if nothing changed
+    saveUninitialized: false, // Prevents saving empty sessions
+    cookie: {
+      secure: false, // 🔹 Set to `true` in production with HTTPS
+      httpOnly: true, // Prevent client-side JavaScript from accessing cookies
+      sameSite: "lax", // Helps with CORS issues
+      maxAge: 24 * 60 * 60 * 1000, // 1 day expiration
+    },
+  })
+);
+
 const wss = new WebSocket.Server({ server });
 const allowedOrigins = [
   "https://mdrrmo---tpms.web.app",
@@ -72,7 +104,7 @@ const serviceAccount = {
   token_uri: process.env.FIREBASE_TOKEN_URI,
   auth_provider_x509_cert_url: process.env.FIREBASE_AUTH_PROVIDER_CERT_URL,
   client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
-  universe_domain: process.env.UNIVERSE_DOMAIN
+  universe_domain: process.env.UNIVERSE_DOMAIN,
 };
 
 admin.initializeApp({
@@ -83,6 +115,7 @@ admin.initializeApp({
 const db = admin.firestore();
 const storage = admin.storage();
 const bucket = storage.bucket();
+const SECRET_KEY = process.env.SECRET_KEY || "your_secret_key";
 
 //caching
 let trainingProgramsCache = null;
@@ -93,6 +126,160 @@ const CACHE_DURATION = 5 * 60 * 1000;
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ error: "Internal server error" });
+});
+
+//LOGIN and AUTH
+
+app.post("/login", async (req, res) => {
+  const { email, password, isTrainerLogin } = req.body; // ✅ Accept `isTrainerLogin`
+
+  try {
+    // 🔍 Select correct Firestore collection
+    const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
+    const usersRef = db.collection(collectionName);
+    const snapshot = await usersRef.where("email", "==", email).get();
+
+    if (snapshot.empty) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    const userDoc = snapshot.docs[0];
+    const userData = userDoc.data();
+
+    // 🔑 Verify password
+    const isMatch = await bcrypt.compare(password, userData.password);
+    if (!isMatch) {
+      return res.status(401).json({ error: "Invalid credentials" });
+    }
+
+    // 🛡️ Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: userDoc.id,
+        profile: userData.profile,
+        trainerName: isTrainerLogin ? userData.trainer_name : null, // Include trainer name if applicable
+      },
+      SECRET_KEY,
+      { expiresIn: "1h" }
+    );
+
+    // 📝 Store session in Firestore
+    await db.collection("Sessions").doc(userDoc.id).set({
+      userId: userDoc.id,
+      profile: userData.profile,
+      lastActive: new Date(),
+    });
+
+    // 🍪 Send token as HTTP-only cookie
+    res.cookie("auth_token", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "Strict",
+      maxAge: 3600000, // 1 hour
+    });
+
+    res.json({
+      message: "Login successful",
+      userId: userDoc.id,
+      profile: userData.profile,
+      trainerName: isTrainerLogin ? userData.trainer_name : null, // Include trainer name in response
+    });
+  } catch (error) {
+    console.error("Login Error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/* ================================
+        🔹 LOGOUT API
+================================ */
+app.post("/logout", async (req, res) => {
+  try {
+    const token = req.cookies.auth_token;
+    if (!token) {
+      return res.json({ message: "Already logged out" });
+    }
+
+    // Verify JWT token
+    const decoded = jwt.verify(token, SECRET_KEY);
+
+    // Remove session from Firestore
+    await db.collection("Sessions").doc(decoded.userId).delete();
+
+    // Remove token from cookies
+    res.clearCookie("auth_token");
+    res.json({ message: "Logout successful" });
+  } catch (error) {
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+/* ================================
+        🔹 MIDDLEWARE TO VERIFY TOKEN
+================================ */
+const verifyToken = async (req, res, next) => {
+  const token = req.cookies.auth_token;
+  if (!token) {
+    return res.status(401).json({ error: "Not authenticated" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user = decoded;
+
+    // ✅ Update last active timestamp to prevent auto logout
+    await db.collection("Sessions").doc(decoded.userId).update({
+      lastActive: new Date(),
+    });
+
+    next();
+  } catch (error) {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+};
+
+/* ================================
+        🔹 CHECK SESSION API
+================================ */
+app.get("/check-session", verifyToken, async (req, res) => {
+  try {
+    console.log("🔍 Checking session for user:", req.user); // Debugging
+
+    const sessionRef = db.collection("Sessions").doc(req.user.userId);
+    const sessionSnap = await sessionRef.get();
+
+    if (!sessionSnap.exists) {
+      // ✅ Remove () after exists
+      console.warn("🚨 No session found for user:", req.user.userId);
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    const sessionData = sessionSnap.data();
+    console.log("✅ Found session:", sessionData);
+
+    if (!sessionData.lastActive) {
+      console.warn("⚠️ Missing lastActive field in session data!");
+      return res.status(500).json({ error: "Session data corrupted" });
+    }
+
+    const lastActive = sessionData.lastActive.toDate().getTime();
+    const now = Date.now();
+
+    console.log("⏳ Last Active:", new Date(lastActive));
+    console.log("🕒 Current Time:", new Date(now));
+
+    if (now - lastActive > 10 * 60 * 1000) {
+      console.log("🚪 Session timeout. Deleting session...");
+      await sessionRef.delete();
+      res.clearCookie("auth_token");
+      return res.status(401).json({ error: "Session timed out" });
+    }
+
+    res.json({ userId: req.user.userId, profile: req.user.profile });
+  } catch (error) {
+    console.error("❌ Internal Server Error:", error); // ✅ Log exact error
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
 
 // ENGAGEMENT LAYOUT
@@ -589,7 +776,7 @@ app.get("/feedback-wordcloud", async (req, res) => {
       const programData = {
         id: programDoc.id,
         ...programDoc.data(),
-        feedbacks: [],
+        feedbacks: [], // Ensure feedbacks always exist
       };
 
       // Fetch feedbacks from the "ratings" subcollection
@@ -609,6 +796,11 @@ app.get("/feedback-wordcloud", async (req, res) => {
       programsData.push(programData);
     }
 
+    // Ensure the response is an array
+    if (!Array.isArray(programsData)) {
+      throw new Error("Invalid response format");
+    }
+
     // Update cache
     trainingProgramsCache = programsData;
     cacheTimestamp = Date.now();
@@ -618,6 +810,191 @@ app.get("/feedback-wordcloud", async (req, res) => {
   } catch (error) {
     console.error("Error fetching training programs:", error);
     res.status(500).json({ message: "Failed to fetch training programs" });
+  }
+});
+
+//download certificate
+
+app.post("/generate-certificate", (req, res) => {
+  const { name, training, location, date, serialNumber } = req.body;
+
+  const templatePath = path.join(__dirname, "Sample-Certificate.docx");
+  const templateContent = fs.readFileSync(templatePath, "binary");
+  const zip = new PizZip(templateContent);
+  const doc = new Docxtemplater(zip);
+
+  doc.setData({ name, training, location, date, serialNumber });
+
+  try {
+    doc.render();
+    const outputBuffer = doc.getZip().generate({ type: "nodebuffer" });
+
+    const outputPath = path.join(__dirname, "Completed-Certificate.docx");
+    fs.writeFileSync(outputPath, outputBuffer);
+
+    res.download(outputPath);
+  } catch (error) {
+    res.status(500).json({ error: "Error generating certificate" });
+  }
+});
+
+//google api
+
+const credentials = {
+  type: "service_account",
+  project_id: process.env.GOOGLE_PROJECT_ID,
+  private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
+  private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, "\n"), // Ensure correct formatting
+  client_email: process.env.GOOGLE_CLIENT_EMAIL,
+  client_id: process.env.GOOGLE_CLIENT_ID,
+  auth_uri: process.env.GOOGLE_AUTH_URI,
+  token_uri: process.env.GOOGLE_TOKEN_URI,
+  auth_provider_x509_cert_url: process.env.GOOGLE_AUTH_CERT_URL,
+  client_x509_cert_url: process.env.GOOGLE_CLIENT_CERT_URL,
+  universe_domain: process.env.GOOGLE_UNIVERSE_DOMAIN,
+};
+
+// Authenticate Service Account
+const auth = new google.auth.JWT(
+  credentials.client_email,
+  null,
+  credentials.private_key,
+  ["https://www.googleapis.com/auth/calendar"]
+);
+
+const calendar = google.calendar({ version: "v3", auth });
+
+// Replace with the **shared** Google Calendar ID
+const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
+
+/**
+ * Add Event to Google Calendar
+ * @param {Object} eventDetails - Details of the event
+ */
+async function addEvent(eventDetails) {
+  const event = {
+    summary: eventDetails.title,
+    location: eventDetails.location,
+    description: eventDetails.description,
+    start: { dateTime: eventDetails.startTime, timeZone: "Asia/Manila" },
+    end: { dateTime: eventDetails.endTime, timeZone: "Asia/Manila" },
+  };
+
+  try {
+    const response = await calendar.events.insert({
+      calendarId: CALENDAR_ID, // Shared calendar ID
+      resource: event,
+    });
+    console.log(`✅ Event added: ${eventDetails.title}`);
+    return response.data;
+  } catch (error) {
+    console.error("❌ Error adding event:", error);
+  }
+}
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.CALENDAR_CLIENT_ID,
+  process.env.CLIENT_SECRET,
+  process.env.REDIRECT_URI
+);
+
+function getAuthenticatedCalendar(tokens) {
+  const authClient = new google.auth.OAuth2(
+    process.env.CALENDAR_CLIENT_ID,
+    process.env.CLIENT_SECRET,
+    process.env.REDIRECT_URI
+  );
+  authClient.setCredentials(tokens);
+  return google.calendar({ version: "v3", auth: authClient });
+}
+
+app.get("/check-auth", (req, res) => {
+  console.log("🔍 Checking authentication session...");
+  console.log("Full Session Data:", req.session); // Debugging
+
+  if (req.session.tokens) {
+    console.log("✅ User is authenticated. Tokens exist.");
+    return res.json({ authenticated: true });
+  }
+
+  console.log("❌ No authentication tokens found.");
+  res.json({ authenticated: false });
+});
+
+// ✅ Step 1: Redirect User to Google OAuth Consent Screen
+app.get("/auth/google", (req, res) => {
+  const authUrl = oauth2Client.generateAuthUrl({
+    access_type: "offline",
+    scope: ["https://www.googleapis.com/auth/calendar.events"],
+    prompt: "consent", // Forces refresh token
+  });
+
+  res.redirect(authUrl);
+});
+
+// ✅ Step 2: Handle Google OAuth Callback
+app.get("/auth/google/callback", async (req, res) => {
+  try {
+    const { code } = req.query;
+    const { tokens } = await oauth2Client.getToken(code);
+    oauth2Client.setCredentials(tokens);
+
+    console.log("✅ Tokens received:", tokens);
+
+    // 🔹 Store tokens in session
+    req.session.tokens = tokens;
+
+    // 🔹 Force session save
+    req.session.save((err) => {
+      if (err) {
+        console.error("❌ Error saving session:", err);
+        return res.status(500).send("Session saving failed");
+      }
+      console.log("✅ Tokens saved in session:", req.session.tokens);
+      res.send(`<script>window.close();</script>`);
+    });
+  } catch (error) {
+    console.error("❌ Error retrieving access token:", error);
+    res.status(500).send("Authentication failed");
+  }
+});
+
+// ✅ Step 3: Sync Events to Google Calendar
+app.post("/sync-google-calendar", async (req, res) => {
+  try {
+    if (!req.session.tokens) {
+      return res.status(401).json({ message: "User not authenticated" });
+    }
+
+    const { events } = req.body;
+    if (!events || events.length === 0) {
+      return res.status(400).json({ message: "No events provided" });
+    }
+
+    console.log(`📩 Syncing ${events.length} events to Google Calendar...`);
+
+    const calendar = getAuthenticatedCalendar(req.session.tokens);
+
+    // Insert All Events
+    const eventPromises = events.map((event) =>
+      calendar.events.insert({
+        calendarId: "primary", // 🔥 Saves to user's personal calendar
+        resource: {
+          summary: event.title,
+          location: event.location || "N/A",
+          description: event.description,
+          start: { dateTime: event.startTime, timeZone: "Asia/Manila" },
+          end: { dateTime: event.endTime, timeZone: "Asia/Manila" },
+        },
+      })
+    );
+
+    await Promise.all(eventPromises);
+    console.log(`✅ Successfully synced ${events.length} events`);
+    res.status(200).json({ message: "Events synced successfully" });
+  } catch (error) {
+    console.error("❌ Error syncing events:", error);
+    res.status(500).json({ message: "Failed to sync events", error });
   }
 });
 

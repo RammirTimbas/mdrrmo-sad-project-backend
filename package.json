@@ -14,12 +14,20 @@
     "@emailjs/browser": "^4.4.1",
     "bcryptjs": "^2.4.3",
     "body-parser": "^1.20.3",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
+    "docxtemplater": "^3.60.2",
+    "dotenv": "^16.4.7",
     "emailjs-com": "^3.2.0",
     "exceljs": "^4.4.0",
-    "express": "^4.21.1",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
     "firebase-admin": "^12.7.0",
+    "fs": "^0.0.1-security",
+    "googleapis": "^148.0.0",
+    "jsonwebtoken": "^9.0.2",
+    "path": "^0.12.7",
+    "pizzip": "^3.1.8",
     "ws": "^8.18.0"
   }
 }
