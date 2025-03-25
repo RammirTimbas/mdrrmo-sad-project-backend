@@ -862,35 +862,11 @@ const auth = new google.auth.JWT(
   ["https://www.googleapis.com/auth/calendar"]
 );
 
-const calendar = google.calendar({ version: "v3", auth });
-
-// Replace with the **shared** Google Calendar ID
-const CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID;
 
 /**
  * Add Event to Google Calendar
  * @param {Object} eventDetails - Details of the event
  */
-async function addEvent(eventDetails) {
-  const event = {
-    summary: eventDetails.title,
-    location: eventDetails.location,
-    description: eventDetails.description,
-    start: { dateTime: eventDetails.startTime, timeZone: "Asia/Manila" },
-    end: { dateTime: eventDetails.endTime, timeZone: "Asia/Manila" },
-  };
-
-  try {
-    const response = await calendar.events.insert({
-      calendarId: CALENDAR_ID, // Shared calendar ID
-      resource: event,
-    });
-    console.log(`✅ Event added: ${eventDetails.title}`);
-    return response.data;
-  } catch (error) {
-    console.error("❌ Error adding event:", error);
-  }
-}
 
 const oauth2Client = new google.auth.OAuth2(
   process.env.CALENDAR_CLIENT_ID,
