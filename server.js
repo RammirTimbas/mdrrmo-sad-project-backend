@@ -17,7 +17,6 @@ const http = require("http");
 const WebSocket = require("ws");
 const jwt = require("jsonwebtoken");
 const cookieParser = require("cookie-parser");
-require("dotenv").config();
 const server = require("http").createServer(app);
 require("dotenv").config();
 const ExcelJS = require("exceljs");
@@ -1204,6 +1203,98 @@ app.post("/populate-crf", upload.single("file"), async (req, res) => {
   } catch (error) {
     console.error("❌ Error populating CRF template:", error);
     res.status(500).json({ message: "Failed to populate CRF template", error });
+  }
+});
+
+
+//notifications 
+
+const sendNotificationToUser = async (userId, title, body) => {
+  try {
+    // Fetch the user's FCM token from the database
+    const userDoc = await db.collection('Users').doc(userId).get();
+    if (!userDoc.exists) {
+      console.log('No such user!');
+      return;
+    }
+
+    const userData = userDoc.data();
+    const token = userData.fcmToken;
+
+    if (token) {
+      const message = {
+        notification: {
+          title,
+          body,
+        },
+        token, // Send to the user's FCM token
+      };
+
+      // Send notification
+      const response = await admin.messaging().send(message);
+      console.log('Successfully sent message:', response);
+    } else {
+      console.log('No FCM token found for this user');
+    }
+  } catch (error) {
+    console.error('Error sending notification:', error);
+  }
+};
+
+const sendNotificationToAll = async (title, body) => {
+  try {
+    // Get all users and their FCM tokens
+    const usersSnapshot = await db.collection('Users').get();
+    const tokens = [];
+
+    usersSnapshot.forEach((doc) => {
+      const userData = doc.data();
+      if (userData.fcmToken) {
+        tokens.push(userData.fcmToken);
+      }
+    });
+
+    if (tokens.length > 0) {
+      const message = {
+        notification: {
+          title,
+          body,
+        },
+        tokens, // Send to all collected tokens
+      };
+
+      // Send notification to all tokens
+      const response = await admin.messaging().sendMulticast(message);
+      console.log('Successfully sent messages to multiple users:', response);
+    } else {
+      console.log('No FCM tokens found for any users');
+    }
+  } catch (error) {
+    console.error('Error sending notification to all users:', error);
+  }
+};
+
+// send notification to a specific user
+app.post('/send-notification', async (req, res) => {
+  const { userId, title, body } = req.body;
+
+  try {
+    await sendNotificationToUser(userId, title, body);
+    res.status(200).send({ message: 'Notification sent successfully' });
+  } catch (error) {
+    res.status(500).send({ error: 'Failed to send notification' });
+  }
+});
+
+// send notification to all users
+app.post('/send-notification-to-all', async (req, res) => {
+  const { title, body } = req.body;
+
+  try {
+    await sendNotificationToAll(title, body);
+    res.status(200).send({ message: 'Notification sent to all users successfully' });
+  } catch (error) {
+    res.status(500).send({ error: 'Failed to send notification to all users' });
   }
 });
 
