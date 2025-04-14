@@ -255,8 +255,8 @@ const verifyToken = async (req, res, next) => {
     res.status(401).json({ error: "Invalid or expired token" });
   }
 };
-
-//check session
+/*
+//check session - 30 mins time out
 app.get("/check-session", verifyToken, async (req, res) => {
   try {
     console.log("🔍 Checking session for user:", req.user); // for debugginh
@@ -295,7 +295,36 @@ app.get("/check-session", verifyToken, async (req, res) => {
     console.error("❌ Internal Server Error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
+}); */
+
+app.get("/check-session", verifyToken, async (req, res) => {
+  try {
+    console.log("🔍 Checking session for user:", req.user); // for debugging
+
+    const sessionRef = db.collection("Sessions").doc(req.user.userId);
+    const sessionSnap = await sessionRef.get();
+
+    if (!sessionSnap.exists) {
+      console.warn("🚨 No session found for user:", req.user.userId);
+      return res.status(401).json({ error: "Session expired" });
+    }
+
+    const sessionData = sessionSnap.data();
+    console.log("✅ Found session:", sessionData);
+
+    if (!sessionData.lastActive) {
+      console.warn("⚠️ Missing lastActive field in session data!");
+      return res.status(500).json({ error: "Session data corrupted" });
+    }
+
+    // Remove the timeout check and return session data
+    res.json({ userId: req.user.userId, profile: req.user.profile, sessionData });
+  } catch (error) {
+    console.error("❌ Internal Server Error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
 });
+
 
 // ENGAGEMENT LAYOUT
 
