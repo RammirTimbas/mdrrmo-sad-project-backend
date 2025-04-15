@@ -1242,6 +1242,8 @@ app.post("/populate-crf", upload.single("file"), async (req, res) => {
 //notifications
 
 const sendNotificationToUser = async (title, body, userId) => {
+
+  console.log("This is the ID: " + userId);
   try {
     // Fetch the user's FCM token from the database
     const userDoc = await db.collection("Users").doc(userId).get();
@@ -1259,7 +1261,7 @@ const sendNotificationToUser = async (title, body, userId) => {
       return;
     }
 
-    console.log("Sending notification to token:", token);
+    console.log("Sending notification to token:", token, " and Id: " + userId);
 
     const message = {
       data: {
