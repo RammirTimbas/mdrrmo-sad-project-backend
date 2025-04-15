@@ -1326,7 +1326,7 @@ const sendNotificationToAll = async (title, body) => {
 // send notification to a specific user
 app.post("/send-notification", async (req, res) => {
   const { title, body, userId } = req.body;
-
+  console.log("This is the ID: " + userId);
   try {
     await sendNotificationToUser(title, body, userId);
     res.status(200).send({ message: "Notification sent successfully" });
