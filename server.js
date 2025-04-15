@@ -1242,7 +1242,6 @@ app.post("/populate-crf", upload.single("file"), async (req, res) => {
 //notifications
 
 const sendNotificationToUser = async (title, body, userId) => {
-
   console.log("This is the ID: " + userId);
   try {
     // Fetch the user's FCM token from the database
@@ -1265,61 +1264,71 @@ const sendNotificationToUser = async (title, body, userId) => {
 
     const message = {
       data: {
-        title, // Include the title in data
-        body, // Include the body in data
+        title,
+        body,
       },
-      token, // Send to the user's FCM token
+      token,
     };
 
-    // Send notification
+    // Try sending notification
     const response = await admin.messaging().send(message);
     console.log("Successfully sent message:", response);
   } catch (error) {
     console.error("Error sending notification:", error);
+
+    // ✅ Clean up invalid token
+    if (error.code === "messaging/registration-token-not-registered") {
+      console.log(`🧹 Removing invalid token for user ${userId}`);
+      await db.collection("Users").doc(userId).update({
+        fcmToken: admin.firestore.FieldValue.delete(),
+      });
+    }
   }
 };
 
 const sendNotificationToAll = async (title, body) => {
   try {
-    // Get all users and their FCM tokens
     const usersSnapshot = await db.collection("Users").get();
-    const tokens = [];
+    const promises = [];
 
     usersSnapshot.forEach((doc) => {
       const userData = doc.data();
-      if (userData.fcmToken) {
-        tokens.push(userData.fcmToken);
+      const token = userData.fcmToken;
+      const userId = doc.id;
+
+      if (token) {
+        const message = {
+          notification: { title, body },
+          token,
+        };
+
+        const sendPromise = admin
+          .messaging()
+          .send(message)
+          .then((response) => {
+            console.log(`✅ Sent to ${userId}:`, response);
+          })
+          .catch(async (error) => {
+            console.error(`❌ Error sending to ${userId}:`, error.message);
+
+            // Remove invalid token from Firestore
+            if (error.code === "messaging/registration-token-not-registered") {
+              console.log(`🧹 Removing invalid token for user ${userId}`);
+              await db
+                .collection("Users")
+                .doc(userId)
+                .update({ fcmToken: admin.firestore.FieldValue.delete() });
+            }
+          });
+
+        promises.push(sendPromise);
       }
     });
 
-    if (tokens.length > 0) {
-      // Iterate over tokens and send notifications one by one
-      const promises = tokens.map(async (token) => {
-        const message = {
-          notification: {
-            title,
-            body,
-          },
-          token, // Send to the user's FCM token
-        };
-
-        // Send notification to this token
-        try {
-          const response = await admin.messaging().send(message);
-          console.log("Successfully sent message to user:", response);
-        } catch (error) {
-          console.error("Error sending message to token:", token, error);
-        }
-      });
-
-      // Wait for all notifications to be sent
-      await Promise.all(promises);
-      console.log("All notifications have been sent");
-    } else {
-      console.log("No FCM tokens found for any users");
-    }
+    await Promise.all(promises);
+    console.log("✅ All notifications attempted");
   } catch (error) {
-    console.error("Error sending notification to all users:", error);
+    console.error("❌ Error sending notifications:", error);
   }
 };
 
