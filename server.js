@@ -24,6 +24,7 @@ const multer = require("multer");
 const JSZip = require("jszip");
 const { readFile, writeFile } = require("fs/promises");
 const { v4: uuidv4 } = require("uuid");
+const cron = require("node-cron");
 
 const upload = multer({
   storage: multer.memoryStorage(), // Use memory storage or disk storage
@@ -1355,6 +1356,216 @@ app.post("/send-notification-to-all", async (req, res) => {
       .send({ message: "Notification sent to all users successfully" });
   } catch (error) {
     res.status(500).send({ error: "Failed to send notification to all users" });
+  }
+});
+
+//notif token cleanup
+
+// 🧽 Cleanup job that runs every day at 2 AM
+cron.schedule("0 0 * * *", async () => {
+  console.log("🔁 Starting FCM token cleanup...");
+
+  const usersSnapshot = await db.collection("Users").get();
+
+  for (const userDoc of usersSnapshot.docs) {
+    const userId = userDoc.id;
+    const userData = userDoc.data();
+    const token = userData.fcmToken;
+
+    if (!token) continue;
+
+    const message = {
+      data: {
+        cleanup: "true", // Silent message
+      },
+      token,
+    };
+
+    try {
+      await admin.messaging().send(message);
+      console.log(`✅ Token for user ${userId} is valid.`);
+    } catch (error) {
+      const code = error.code;
+      console.log(`⚠️ Error for token of user ${userId}: ${code}`);
+
+      if (
+        code === "messaging/registration-token-not-registered" ||
+        code === "messaging/invalid-argument"
+      ) {
+        console.log(`🧹 Cleaning up invalid token for user ${userId}`);
+
+        await db.collection("Users").doc(userId).update({
+          fcmToken: admin.firestore.FieldValue.delete(),
+        });
+      }
+    }
+  }
+
+  console.log("✅ FCM token cleanup complete.");
+});
+
+// Manual trigger for FCM token cleanup
+app.post("/trigger-token-cleanup", async (req, res) => {
+  try {
+    console.log("🔁 Manual FCM token cleanup triggered...");
+
+    const usersSnapshot = await db.collection("Users").get();
+
+    for (const userDoc of usersSnapshot.docs) {
+      const userId = userDoc.id;
+      const userData = userDoc.data();
+      const token = userData.fcmToken;
+
+      if (!token) continue;
+
+      const message = {
+        data: {
+          cleanup: "true", // Silent message
+        },
+        token,
+      };
+
+      try {
+        await admin.messaging().send(message);
+        console.log(`✅ Token for user ${userId} is valid.`);
+      } catch (error) {
+        const code = error.code;
+        console.log(`⚠️ Error for token of user ${userId}: ${code}`);
+
+        if (
+          code === "messaging/registration-token-not-registered" ||
+          code === "messaging/invalid-argument"
+        ) {
+          console.log(`🧹 Cleaning up invalid token for user ${userId}`);
+
+          await db.collection("Users").doc(userId).update({
+            fcmToken: admin.firestore.FieldValue.delete(),
+          });
+        }
+      }
+    }
+
+    console.log("✅ Manual FCM token cleanup complete.");
+    res.status(200).send({ message: "Manual token cleanup complete" });
+  } catch (error) {
+    console.error("❌ Error during manual token cleanup:", error);
+    res.status(500).send({ error: "Failed to clean up tokens" });
+  }
+});
+
+//reminder program
+
+const sendReminder = async (title, body, userId) => {
+  try {
+    const userDoc = await db.collection("Users").doc(userId).get();
+    if (!userDoc.exists) {
+      console.log("User not found: ", userId);
+      return;
+    }
+
+    const userData = userDoc.data();
+    const token = userData.fcmToken;
+
+    if (!token) {
+      console.log("No FCM token for user: ", userId);
+      return;
+    }
+
+    const message = {
+      notification: {
+        title,
+        body,
+      },
+      token,
+    };
+
+    const response = await admin.messaging().send(message);
+    console.log("Successfully sent reminder to", userId, ":", response);
+  } catch (error) {
+    console.error("Error sending reminder:", error);
+  }
+};
+
+cron.schedule("0 0 * * *", async () => {
+  // This runs every day at 12:00 AM UTC
+  console.log("🔁 Starting daily program reminder check...");
+
+  try {
+    const programsSnapshot = await db.collection("Training Programs").get();
+
+    for (const programDoc of programsSnapshot.docs) {
+      const programData = programDoc.data();
+      const programId = programDoc.id;
+
+      let upcomingDate = null;
+
+      // For programs with selected_dates
+      if (programData.selected_dates && programData.selected_dates.length > 0) {
+        // Find the next upcoming date (the earliest future date)
+        upcomingDate = programData.selected_dates.find(
+          (date) => date > Date.now() / 1000
+        ); // Compare Unix timestamps
+      } else if (programData.start_date) {
+        upcomingDate = programData.start_date; // For programs with a single start date
+      }
+
+      // If the program has a valid upcoming date and it's within 1 day from now (86400 seconds = 1 day)
+      if (upcomingDate && upcomingDate - Date.now() / 1000 <= 86400) {
+        // Check if the program is not completed (end_date not passed)
+        if (!programData.end_date || upcomingDate <= programData.end_date) {
+          // Get approved applicants
+          const approvedApplicants = programData.approved_applicants;
+
+          for (const applicantId in approvedApplicants) {
+            const applicant = approvedApplicants[applicantId];
+
+            if (applicant.status === "approved") {
+              // Check if the applicant has already received a reminder today
+              const userDoc = await db
+                .collection("Users")
+                .doc(applicant.user_id)
+                .get();
+              const userData = userDoc.data();
+
+              // Assuming you store the reminder_sent timestamp or flag in each user document
+              const reminderSentTimestamp = userData?.reminders?.[programId];
+
+              // Get the current date (start of the day in Unix timestamp)
+              const startOfDay = new Date();
+              startOfDay.setHours(0, 0, 0, 0);
+              const currentDateTimestamp = Math.floor(
+                startOfDay.getTime() / 1000
+              ); // Convert to Unix timestamp
+
+              if (reminderSentTimestamp !== currentDateTimestamp) {
+                // Send a reminder if it hasn't been sent today
+                const title = `Reminder: Upcoming Program ${programData.program_title}`;
+                const body = `Your training session for "${programData.program_title}" is starting soon!`;
+
+                // Send a reminder notification to each approved applicant
+                await sendReminder(title, body, applicant.user_id);
+
+                // Update the user's document to record the reminder as sent for today
+                await db
+                  .collection("Users")
+                  .doc(applicant.user_id)
+                  .update({
+                    [`reminders.${programId}`]: currentDateTimestamp, // Store the timestamp of reminder sent
+                  });
+              } else {
+                console.log(
+                  `✅ Reminder already sent to ${applicant.user_id} for program ${programData.program_title}`
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
+    console.log("✅ Daily program reminder check complete.");
+  } catch (error) {
+    console.error("Error during daily reminder check:", error);
   }
 });
 
