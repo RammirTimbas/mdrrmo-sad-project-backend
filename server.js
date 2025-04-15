@@ -318,13 +318,16 @@ app.get("/check-session", verifyToken, async (req, res) => {
     }
 
     // Remove the timeout check and return session data
-    res.json({ userId: req.user.userId, profile: req.user.profile, sessionData });
+    res.json({
+      userId: req.user.userId,
+      profile: req.user.profile,
+      sessionData,
+    });
   } catch (error) {
     console.error("❌ Internal Server Error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 // ENGAGEMENT LAYOUT
 
@@ -1225,7 +1228,8 @@ app.post("/populate-crf", upload.single("file"), async (req, res) => {
     const newDocxBuffer = await zip.generateAsync({ type: "nodebuffer" });
 
     res.set({
-      "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "Content-Type":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "Content-Disposition": `attachment; filename="CRF-Copy.docx"`,
     });
     res.send(newDocxBuffer);
@@ -1235,15 +1239,14 @@ app.post("/populate-crf", upload.single("file"), async (req, res) => {
   }
 });
 
-
-//notifications 
+//notifications
 
 const sendNotificationToUser = async (title, body, userId) => {
   try {
     // Fetch the user's FCM token from the database
-    const userDoc = await db.collection('Users').doc(userId).get();
+    const userDoc = await db.collection("Users").doc(userId).get();
     if (!userDoc.exists) {
-      console.log('No such user!');
+      console.log("NOTIFICATION: No such user!");
       return;
     }
 
@@ -1254,26 +1257,26 @@ const sendNotificationToUser = async (title, body, userId) => {
       const message = {
         data: {
           title, // Include the title in data
-          body,  // Include the body in data
+          body, // Include the body in data
         },
         token, // Send to the user's FCM token
       };
 
       // Send notification
       const response = await admin.messaging().send(message);
-      console.log('Successfully sent message:', response);
+      console.log("Successfully sent message:", response);
     } else {
-      console.log('No FCM token found for this user');
+      console.log("No FCM token found for this user");
     }
   } catch (error) {
-    console.error('Error sending notification:', error);
+    console.error("Error sending notification:", error);
   }
 };
 
 const sendNotificationToAll = async (title, body) => {
   try {
     // Get all users and their FCM tokens
-    const usersSnapshot = await db.collection('Users').get();
+    const usersSnapshot = await db.collection("Users").get();
     const tokens = [];
 
     usersSnapshot.forEach((doc) => {
@@ -1284,50 +1287,61 @@ const sendNotificationToAll = async (title, body) => {
     });
 
     if (tokens.length > 0) {
-      const message = {
-        data: {
-          title, // Include the title in data
-          body,  // Include the body in data
-        },
-        tokens, // Send to all collected tokens
-      };
+      // Iterate over tokens and send notifications one by one
+      const promises = tokens.map(async (token) => {
+        const message = {
+          notification: {
+            title,
+            body,
+          },
+          token, // Send to the user's FCM token
+        };
 
-      // Send notification to all tokens
-      const response = await admin.messaging().sendMulticast(message);
-      console.log('Successfully sent messages to multiple users:', response);
+        // Send notification to this token
+        try {
+          const response = await admin.messaging().send(message);
+          console.log("Successfully sent message to user:", response);
+        } catch (error) {
+          console.error("Error sending message to token:", token, error);
+        }
+      });
+
+      // Wait for all notifications to be sent
+      await Promise.all(promises);
+      console.log("All notifications have been sent");
     } else {
-      console.log('No FCM tokens found for any users');
+      console.log("No FCM tokens found for any users");
     }
   } catch (error) {
-    console.error('Error sending notification to all users:', error);
+    console.error("Error sending notification to all users:", error);
   }
 };
 
-
 // send notification to a specific user
-app.post('/send-notification', async (req, res) => {
+app.post("/send-notification", async (req, res) => {
   const { title, body, userId } = req.body;
 
   try {
     await sendNotificationToUser(userId, title, body);
-    res.status(200).send({ message: 'Notification sent successfully' });
+    res.status(200).send({ message: "Notification sent successfully" });
   } catch (error) {
-    res.status(500).send({ error: 'Failed to send notification' });
+    res.status(500).send({ error: "Failed to send notification" });
   }
 });
 
 // send notification to all users
-app.post('/send-notification-to-all', async (req, res) => {
+app.post("/send-notification-to-all", async (req, res) => {
   const { title, body } = req.body;
 
   try {
     await sendNotificationToAll(title, body);
-    res.status(200).send({ message: 'Notification sent to all users successfully' });
+    res
+      .status(200)
+      .send({ message: "Notification sent to all users successfully" });
   } catch (error) {
-    res.status(500).send({ error: 'Failed to send notification to all users' });
+    res.status(500).send({ error: "Failed to send notification to all users" });
   }
 });
-
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
