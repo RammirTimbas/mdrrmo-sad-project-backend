@@ -1322,7 +1322,7 @@ app.post("/send-notification", async (req, res) => {
   const { title, body, userId } = req.body;
 
   try {
-    await sendNotificationToUser(userId, title, body);
+    await sendNotificationToUser(title, body, userId);
     res.status(200).send({ message: "Notification sent successfully" });
   } catch (error) {
     res.status(500).send({ error: "Failed to send notification" });
