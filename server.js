@@ -1246,28 +1246,32 @@ const sendNotificationToUser = async (title, body, userId) => {
     // Fetch the user's FCM token from the database
     const userDoc = await db.collection("Users").doc(userId).get();
     if (!userDoc.exists) {
-      console.log("NOTIFICATION: No such user!");
+      console.log("NOTIFICATION: No such user! " + userId);
       return;
     }
 
     const userData = userDoc.data();
     const token = userData.fcmToken;
 
-    if (token) {
-      const message = {
-        data: {
-          title, // Include the title in data
-          body, // Include the body in data
-        },
-        token, // Send to the user's FCM token
-      };
-
-      // Send notification
-      const response = await admin.messaging().send(message);
-      console.log("Successfully sent message:", response);
-    } else {
-      console.log("No FCM token found for this user");
+    // Check if token is available
+    if (!token) {
+      console.log("NOTIFICATION: No FCM token found for this user");
+      return;
     }
+
+    console.log("Sending notification to token:", token);
+
+    const message = {
+      data: {
+        title, // Include the title in data
+        body, // Include the body in data
+      },
+      token, // Send to the user's FCM token
+    };
+
+    // Send notification
+    const response = await admin.messaging().send(message);
+    console.log("Successfully sent message:", response);
   } catch (error) {
     console.error("Error sending notification:", error);
   }
