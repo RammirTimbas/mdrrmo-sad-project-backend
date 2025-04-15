@@ -313,12 +313,7 @@ app.get("/check-session", verifyToken, async (req, res) => {
     const sessionData = sessionSnap.data();
     console.log("✅ Found session:", sessionData);
 
-    if (!sessionData.lastActive) {
-      console.warn("⚠️ Missing lastActive field in session data!");
-      return res.status(500).json({ error: "Session data corrupted" });
-    }
-
-    // Remove the timeout check and return session data
+    // Just return session data without any timeout checks
     res.json({
       userId: req.user.userId,
       profile: req.user.profile,
