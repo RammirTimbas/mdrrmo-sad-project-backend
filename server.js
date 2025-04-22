@@ -26,6 +26,8 @@ const { readFile, writeFile } = require("fs/promises");
 const { v4: uuidv4 } = require("uuid");
 const cron = require("node-cron");
 
+const nodemailer = require("nodemailer");
+
 const upload = multer({
   storage: multer.memoryStorage(), // Use memory storage or disk storage
   limits: { fileSize: 10 * 1024 * 1024 }, // Limit: 10MB
@@ -1561,6 +1563,51 @@ cron.schedule("0 0 * * *", async () => {
     console.log("✅ Daily program reminder check complete.");
   } catch (error) {
     console.error("Error during daily reminder check:", error);
+  }
+});
+
+const SERVER_URL = "https://mdrrmo-sad-project-backend.onrender.com";
+
+const GMAIL_USER = "rammirtimbas321@gmail.com";
+const GMAIL_PASS = process.env.GMAIL_PASS; 
+const ALERT_RECEIVER = "timbasrammir16@gmail.com";
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: GMAIL_USER,
+    pass: GMAIL_PASS,
+  },
+});
+
+const sendAlertEmail = async (error) => {
+  const mailOptions = {
+    from: `"Server Watchdog" <${GMAIL_USER}>`,
+    to: ALERT_RECEIVER,
+    subject: "Server Ping Failed!",
+    text: `Ping to ${SERVER_URL} failed.\n\nError: ${error.message}\nTime: ${new Date().toLocaleString()}`,
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log("📧 Alert email sent.");
+  } catch (err) {
+    console.error("❌ Failed to send alert email:", err.message);
+  }
+};
+
+cron.schedule("*/5 * * * *", async () => {
+  try {
+    const res = await fetch(SERVER_URL);
+    console.log(
+      `[${new Date().toLocaleTimeString()}] Gising boi: ${res.status}`
+    );
+  } catch (error) {
+    console.error(
+      `[${new Date().toLocaleTimeString()}] ❌ Error pinging server:`,
+      error.message
+    );
+    await sendAlertEmail(error);
   }
 });
 
