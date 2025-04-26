@@ -155,7 +155,7 @@ app.use((err, req, res, next) => {
 //LOGIN and AUTH
 
 app.post("/login", async (req, res) => {
-  const { email, password, isTrainerLogin, rememberMe, forceLogin } = req.body; // ⬅️ accept forceLogin
+  const { email, password, isTrainerLogin, rememberMe, forceLogin } = req.body;
 
   try {
     const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
@@ -178,11 +178,12 @@ app.post("/login", async (req, res) => {
     const existingSession = await sessionRef.get();
 
     if (existingSession.exists && !forceLogin) {
-      // ⬅️ User already has an active session
+      // ⬅️ User has a session — NO cookie yet — tell frontend first
       return res.status(409).json({ error: "Session already active" });
     }
 
-    // Generate new token
+    // ✅ Here, user is allowed to login (forced OR no session)
+    // Generate token
     const token = jwt.sign(
       {
         userId: userDoc.id,
@@ -200,6 +201,7 @@ app.post("/login", async (req, res) => {
       lastActive: new Date(),
     });
 
+    // ⬇️ NOW finally set the cookie
     res.cookie("auth_token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -213,11 +215,13 @@ app.post("/login", async (req, res) => {
       profile: userData.profile,
       trainerName: isTrainerLogin ? userData.trainer_name : null,
     });
+
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 //logout
 app.post("/logout", async (req, res) => {
