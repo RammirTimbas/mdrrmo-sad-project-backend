@@ -155,10 +155,9 @@ app.use((err, req, res, next) => {
 //LOGIN and AUTH
 
 app.post("/login", async (req, res) => {
-  const { email, password, isTrainerLogin } = req.body;
+  const { email, password, isTrainerLogin, rememberMe, forceLogin } = req.body; // ⬅️ accept forceLogin
 
   try {
-    // check if the user is an applicant or a trainer
     const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
     const usersRef = db.collection(collectionName);
     const snapshot = await usersRef.where("email", "==", email).get();
@@ -170,13 +169,20 @@ app.post("/login", async (req, res) => {
     const userDoc = snapshot.docs[0];
     const userData = userDoc.data();
 
-    // verify pass
     const isMatch = await bcrypt.compare(password, userData.password);
     if (!isMatch) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // generate token
+    const sessionRef = db.collection("Sessions").doc(userDoc.id);
+    const existingSession = await sessionRef.get();
+
+    if (existingSession.exists && !forceLogin) {
+      // ⬅️ User already has an active session
+      return res.status(409).json({ error: "Session already active" });
+    }
+
+    // Generate new token
     const token = jwt.sign(
       {
         userId: userDoc.id,
@@ -184,10 +190,11 @@ app.post("/login", async (req, res) => {
         trainerName: isTrainerLogin ? userData.trainer_name : null,
       },
       SECRET_KEY,
-      { expiresIn: "1h" }
+      { expiresIn: rememberMe ? "7d" : "1h" }
     );
 
-    await db.collection("Sessions").doc(userDoc.id).set({
+    // Save or overwrite session
+    await sessionRef.set({
       userId: userDoc.id,
       profile: userData.profile,
       lastActive: new Date(),
@@ -197,7 +204,7 @@ app.post("/login", async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "None",
-      maxAge: 3600000, // 1 hour
+      maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
     });
 
     res.json({
@@ -1569,7 +1576,7 @@ cron.schedule("0 0 * * *", async () => {
 const SERVER_URL = "https://mdrrmo-sad-project-backend.onrender.com";
 
 const GMAIL_USER = "rammirtimbas321@gmail.com";
-const GMAIL_PASS = process.env.GMAIL_PASS; 
+const GMAIL_PASS = process.env.GMAIL_PASS;
 const ALERT_RECEIVER = "timbasrammir16@gmail.com";
 
 const transporter = nodemailer.createTransport({
@@ -1585,7 +1592,9 @@ const sendAlertEmail = async (error) => {
     from: `"Server Watchdog" <${GMAIL_USER}>`,
     to: ALERT_RECEIVER,
     subject: "Server Ping Failed!",
-    text: `Ping to ${SERVER_URL} failed.\n\nError: ${error.message}\nTime: ${new Date().toLocaleString()}`,
+    text: `Ping to ${SERVER_URL} failed.\n\nError: ${
+      error.message
+    }\nTime: ${new Date().toLocaleString()}`,
   };
 
   try {
