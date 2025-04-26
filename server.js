@@ -178,12 +178,25 @@ app.post("/login", async (req, res) => {
     const existingSession = await sessionRef.get();
 
     if (existingSession.exists && !forceLogin) {
-      // ⬅️ User has a session — NO cookie yet — tell frontend first
+      // ⬅️ User has an active session and forceLogin is not enabled
       return res.status(409).json({ error: "Session already active" });
     }
 
-    // ✅ Here, user is allowed to login (forced OR no session)
-    // Generate token
+    // ✅ Here, user is allowed to log in (forced OR no session)
+    // If forceLogin is enabled, delete all other sessions for this user
+    if (forceLogin) {
+      const sessionsSnapshot = await db
+        .collection("Sessions")
+        .where("userId", "==", userDoc.id)
+        .get();
+      sessionsSnapshot.forEach((doc) => {
+        if (doc.id !== sessionRef.id) {
+          doc.ref.delete(); // Delete previous sessions (except the current one)
+        }
+      });
+    }
+
+    // Generate a new token
     const token = jwt.sign(
       {
         userId: userDoc.id,
@@ -201,7 +214,7 @@ app.post("/login", async (req, res) => {
       lastActive: new Date(),
     });
 
-    // ⬇️ NOW finally set the cookie
+    // Now finally set the cookie
     res.cookie("auth_token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -215,13 +228,11 @@ app.post("/login", async (req, res) => {
       profile: userData.profile,
       trainerName: isTrainerLogin ? userData.trainer_name : null,
     });
-
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 //logout
 app.post("/logout", async (req, res) => {
