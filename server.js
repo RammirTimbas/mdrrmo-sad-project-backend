@@ -1646,6 +1646,31 @@ cron.schedule("*/5 * * * *", async () => {
   }
 });
 
+app.get("/get-user/:userId", async (req, res) => {
+  const { userId } = req.params;
+
+  try {
+    const userDoc = await admin
+      .firestore()
+      .collection("Users")
+      .doc(userId)
+      .get();
+
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userData = userDoc.data();
+
+    const { email, profile, pin } = userData;
+
+    return res.status(200).json({ email, profile, pin });
+  } catch (error) {
+    console.error("Error fetching user:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
