@@ -155,7 +155,15 @@ app.use((err, req, res, next) => {
 //LOGIN and AUTH
 
 app.post("/login", async (req, res) => {
-  const { email, password, isTrainerLogin, rememberMe, forceLogin } = req.body;
+  const {
+    email,
+    password,
+    isTrainerLogin,
+    rememberMe,
+    forceLogin,
+    sessionId,
+    deviceName,
+  } = req.body;
 
   try {
     const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
@@ -183,7 +191,6 @@ app.post("/login", async (req, res) => {
     }
 
     // ✅ Here, user is allowed to log in (forced OR no session)
-    // If forceLogin is enabled, delete all other sessions for this user
     if (forceLogin) {
       const sessionsSnapshot = await db
         .collection("Sessions")
@@ -207,11 +214,13 @@ app.post("/login", async (req, res) => {
       { expiresIn: rememberMe ? "7d" : "1h" }
     );
 
-    // Save or overwrite session
+    // Save or overwrite session with the session ID and device name
     await sessionRef.set({
       userId: userDoc.id,
       profile: userData.profile,
       lastActive: new Date(),
+      sessionId,
+      deviceName,
     });
 
     // Now finally set the cookie
@@ -337,11 +346,13 @@ app.get("/check-session", verifyToken, async (req, res) => {
     const sessionData = sessionSnap.data();
     console.log("✅ Found session:", sessionData);
 
-    // Just return session data without any timeout checks
+    // Return session data along with session ID and device name
     res.json({
       userId: req.user.userId,
       profile: req.user.profile,
       sessionData,
+      sessionId: req.headers["session-id"],
+      deviceName: req.headers["device-name"],
     });
   } catch (error) {
     console.error("❌ Internal Server Error:", error);
