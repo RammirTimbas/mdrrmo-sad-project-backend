@@ -25,6 +25,7 @@ const JSZip = require("jszip");
 const { readFile, writeFile } = require("fs/promises");
 const { v4: uuidv4 } = require("uuid");
 const cron = require("node-cron");
+const axios = require("axios");
 
 const nodemailer = require("nodemailer");
 
@@ -66,6 +67,7 @@ const allowedOrigins = [
 ];
 
 const SECRET_KEY = process.env.SECRET_KEY || "rammir_key";
+const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
 
 app.use(
   cors({
@@ -1670,6 +1672,215 @@ app.get("/get-user/:userId", async (req, res) => {
     return res.status(500).json({ error: "Internal server error" });
   }
 });
+
+//chats
+
+async function getAvailableTrainings(location = "", date = "", type = "") {
+  try {
+    let trainingQuery = db.collection("Training Programs");
+
+    // Get the current date and time (in Unix timestamp format, seconds)
+    const now = Math.floor(Date.now() / 1000);
+
+    // Filter to exclude past programs
+    trainingQuery = trainingQuery.where("end_date", ">=", now); // Only include programs that end in the future
+
+    // Filter by location if provided
+    if (location) {
+      trainingQuery = trainingQuery.where("program_venue", "==", location);
+    }
+
+    // Filter by date if provided
+    if (date) {
+      const [month, day, year] = date.split("/"); // Assuming date is in MM/DD/YYYY format
+      const startOfDay = new Date(`${year}-${month}-${day}`); // Start of the day (00:00:00)
+      const endOfDay = new Date(startOfDay); // Copy startOfDay to modify it
+      endOfDay.setHours(23, 59, 59, 999); // End of the day (23:59:59)
+
+      const selectedStartUnix = Math.floor(startOfDay.getTime() / 1000); // Unix timestamp for 00:00:00
+      const selectedEndUnix = Math.floor(endOfDay.getTime() / 1000); // Unix timestamp for 23:59:59
+
+      // Log the selected date to verify the value
+      console.log(
+        "Selected Date Range (start to end of the day):",
+        selectedStartUnix,
+        selectedEndUnix
+      );
+
+      // Modify query to find programs where selectedDate falls between start_date and end_date
+      trainingQuery = trainingQuery
+        .where("start_date", "<=", selectedEndUnix) // Program must start before or on the end of the day
+        .where("end_date", ">=", selectedStartUnix); // Program must end after or on the start of the day
+    }
+
+    // Filter by type if provided
+    if (type) {
+      trainingQuery = trainingQuery.where("type", "==", type);
+    }
+
+    // Get the results
+    const snapshot = await trainingQuery.get();
+
+    if (snapshot.empty) {
+      return "No training programs found based on your criteria.";
+    }
+
+    let trainings = [];
+    snapshot.forEach((doc) => {
+      const program = doc.data();
+      const programDetails = {
+        title: program.program_title,
+        description: program.description,
+        venue: program.program_venue,
+        start_date: new Date(program.start_date * 1000).toLocaleDateString(),
+        end_date: new Date(program.end_date * 1000).toLocaleDateString(),
+        trainer: program.trainer_assigned,
+        slots: program.slots,
+      };
+      trainings.push(programDetails);
+    });
+
+    return trainings;
+  } catch (error) {
+    console.error("Error fetching training programs:", error);
+    throw new Error("Error fetching available training programs.");
+  }
+}
+
+const context = require("./ai-context.json");
+
+app.post("/chat", async (req, res) => {
+  const userMessage = req.body.message.trim();
+
+  try {
+    // Initialize session variables if not present
+    req.session.location ??= "";
+    req.session.date ??= "";
+    req.session.type ??= "";
+    req.session.findTrainingMode ??= false;
+
+    // Handle greetings
+    const greetings = [
+      "hi",
+      "hello",
+      "good morning",
+      "good afternoon",
+      "good evening",
+    ];
+    if (greetings.includes(userMessage.toLowerCase())) {
+      return res.json({ reply: "Hello! How can I assist you today? 😊" });
+    }
+
+    // Handle quick buttons
+    const quickMessages = ["Available Trainings", "Help me find a Training"];
+    if (quickMessages.includes(userMessage)) {
+      if (userMessage === "Available Trainings") {
+        const availableTrainings = await getAvailableTrainings(
+          req.session.location,
+          req.session.date,
+          req.session.type
+        );
+        return res.json({ reply: formatTrainingsList(availableTrainings) });
+      }
+
+      if (userMessage === "Help me find a Training") {
+        req.session.location = "";
+        req.session.date = "";
+        req.session.type = "";
+        req.session.findTrainingMode = true; // <<-- Important
+        return res.json({
+          reply:
+            "Sure! Let's start. Please provide your location (e.g., Daet, Camarines Norte).",
+        });
+      }
+    }
+
+    // ---- Handle "find a training" step-by-step flow ----
+    if (req.session.findTrainingMode) {
+      // Step 1: Capture location
+      if (!req.session.location) {
+        req.session.location = userMessage;
+        return res.json({
+          reply: `Got it! Your location is ${req.session.location}. Now, what date are you looking at? (e.g., 05/10/2025)`,
+        });
+      }
+
+      // Step 2: Capture date
+      if (!req.session.date) {
+        req.session.date = userMessage;
+        return res.json({
+          reply: `Thanks! You prefer the date ${req.session.date}. Lastly, what type of training do you want? (e.g., Basic First Aid)`,
+        });
+      }
+
+      // Step 3: Capture type
+      if (!req.session.type) {
+        req.session.type = userMessage;
+
+        // Now fetch trainings
+        const availableTrainings = await getAvailableTrainings(
+          req.session.location,
+          req.session.date,
+          req.session.type
+        );
+
+        // Reset session after showing trainings
+        req.session.location = "";
+        req.session.date = "";
+        req.session.type = "";
+        req.session.findTrainingMode = false; // <<-- Very Important: End the flow
+
+        return res.json({ reply: formatTrainingsList(availableTrainings) });
+      }
+    }
+
+    // ---- Normal chat flow using Together AI (FAQs, random questions) ----
+    const url = "https://api.together.xyz/v1/chat/completions";
+    const options = {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+        authorization: `Bearer ${TOGETHER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
+        messages: [
+          { role: "system", content: context.context.description },
+          { role: "user", content: userMessage },
+        ],
+        temperature: 0.3,
+      }),
+    };
+
+    const response = await fetch(url, options);
+    const data = await response.json();
+    let extractedResponse = data.choices[0].message.content;
+    extractedResponse = extractedResponse
+      .replace(/<think>.*?<\/think>/gs, "")
+      .trim();
+
+    return res.json({ reply: extractedResponse });
+  } catch (error) {
+    console.error("Error processing chat:", error);
+    return res.status(500).json({ reply: "Sorry, something went wrong!" });
+  }
+});
+
+// Helper to format trainings
+function formatTrainingsList(trainings) {
+  if (typeof trainings === "string") {
+    return trainings; // like "No training programs found..."
+  }
+
+  let formatted = "Here are the available trainings:\n\n";
+  trainings.forEach((t, index) => {
+    formatted += `${index + 1}. ${t.title}\nVenue: ${t.venue}\nDate: ${
+      t.start_date
+    } - ${t.end_date}\nTrainer: ${t.trainer}\nSlots Available: ${t.slots}\n\n`;
+  });
+  return formatted;
+}
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
