@@ -156,6 +156,25 @@ app.use((err, req, res, next) => {
 
 //LOGIN and AUTH
 
+const MAX_FAILED_ATTEMPTS = 5;
+const BLOCK_DURATION_MINUTES = 15;
+
+async function isBlocked(email) {
+  const ref = db.collection("LoginAttempts").doc(email);
+  const doc = await ref.get();
+
+  if (!doc.exists) return false;
+
+  const data = doc.data();
+  const now = Date.now();
+
+  if (data.blockedUntil && now < data.blockedUntil.toMillis()) {
+    return true;
+  }
+
+  return false;
+}
+
 app.post("/login", async (req, res) => {
   const {
     email,
@@ -172,7 +191,17 @@ app.post("/login", async (req, res) => {
     const usersRef = db.collection(collectionName);
     const snapshot = await usersRef.where("email", "==", email).get();
 
+    const attemptsRef = db.collection("LoginAttempts").doc(email);
+
+    // check if login is blocked
+    if (await isBlocked(email)) {
+      return res.status(429).json({
+        error: `Too many failed login attempts. Please try again in ${BLOCK_DURATION_MINUTES} minutes.`,
+      });
+    }
+
     if (snapshot.empty) {
+      await handleFailedAttempt(attemptsRef);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
@@ -181,31 +210,37 @@ app.post("/login", async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, userData.password);
     if (!isMatch) {
+      await handleFailedAttempt(attemptsRef);
       return res.status(401).json({ error: "Invalid credentials" });
     }
+
+    // 🔓 Successful login, reset failed attempts
+    await attemptsRef.delete().catch(() => {});
 
     const sessionRef = db.collection("Sessions").doc(userDoc.id);
     const existingSession = await sessionRef.get();
 
     if (existingSession.exists && !forceLogin) {
-      // ⬅️ User has an active session and forceLogin is not enabled
-      return res.status(409).json({ error: "Session already active" });
+      return res.status(409).json({
+        error: "Session already active",
+        activeDevice: existingSession.data().deviceName || "another device",
+      });
     }
 
-    // ✅ Here, user is allowed to log in (forced OR no session)
+    // If forceLogin, remove all other sessions
     if (forceLogin) {
       const sessionsSnapshot = await db
         .collection("Sessions")
         .where("userId", "==", userDoc.id)
         .get();
+
       sessionsSnapshot.forEach((doc) => {
         if (doc.id !== sessionRef.id) {
-          doc.ref.delete(); // Delete previous sessions (except the current one)
+          doc.ref.delete();
         }
       });
     }
 
-    // Generate a new token
     const token = jwt.sign(
       {
         userId: userDoc.id,
@@ -216,7 +251,7 @@ app.post("/login", async (req, res) => {
       { expiresIn: rememberMe ? "7d" : "1h" }
     );
 
-    // Save or overwrite session with the session ID and device name
+    // Save new session
     await sessionRef.set({
       userId: userDoc.id,
       profile: userData.profile,
@@ -225,7 +260,6 @@ app.post("/login", async (req, res) => {
       deviceName,
     });
 
-    // Now finally set the cookie
     res.cookie("auth_token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -244,6 +278,26 @@ app.post("/login", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+// record failed login attempts
+async function handleFailedAttempt(attemptsRef) {
+  const doc = await attemptsRef.get();
+  const data = doc.exists ? doc.data() : { failedCount: 0 };
+  const failedCount = (data.failedCount || 0) + 1;
+
+  const updateData = {
+    failedCount,
+    lastAttempt: new Date(),
+  };
+
+  if (failedCount >= MAX_FAILED_ATTEMPTS) {
+    updateData.blockedUntil = new Date(
+      Date.now() + BLOCK_DURATION_MINUTES * 60 * 1000
+    );
+  }
+
+  await attemptsRef.set(updateData, { merge: true });
+}
 
 //logout
 app.post("/logout", async (req, res) => {
