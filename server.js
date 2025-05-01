@@ -190,7 +190,6 @@ app.post("/login", async (req, res) => {
   } = req.body;
 
   try {
-    // Skip reCAPTCHA if token is not provided (graceful degradation)
     const verifyRes = await fetch(
       `https://www.google.com/recaptcha/api/siteverify`,
       {
@@ -202,7 +201,7 @@ app.post("/login", async (req, res) => {
     const verifyData = await verifyRes.json();
 
     if (!verifyData.success) {
-      return res.status(469).json({ error: "Failed reCAPTCHA validation" });
+      return res.status(403).json({ error: "Failed reCAPTCHA validation" });
     }
 
     const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
