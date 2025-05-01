@@ -175,6 +175,8 @@ async function isBlocked(email) {
   return false;
 }
 
+const RECAPTCHA_SECRET_KEY = process.env.RECAPTCHA_SECRET_KEY;
+
 app.post("/login", async (req, res) => {
   const {
     email,
@@ -184,9 +186,25 @@ app.post("/login", async (req, res) => {
     forceLogin,
     sessionId,
     deviceName,
+    recaptchaToken,
   } = req.body;
 
   try {
+    // Skip reCAPTCHA if token is not provided (graceful degradation)
+    const verifyRes = await fetch(
+      `https://www.google.com/recaptcha/api/siteverify`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `secret=${RECAPTCHA_SECRET_KEY}&response=${recaptchaToken}`,
+      }
+    );
+    const verifyData = await verifyRes.json();
+
+    if (!verifyData.success) {
+      return res.status(469).json({ error: "Failed reCAPTCHA validation" });
+    }
+
     const collectionName = isTrainerLogin ? "Trainer Name" : "Users";
     const usersRef = db.collection(collectionName);
     const snapshot = await usersRef.where("email", "==", email).get();
