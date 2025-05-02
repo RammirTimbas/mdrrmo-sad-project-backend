@@ -183,13 +183,13 @@ app.post("/login", async (req, res) => {
     password,
     isTrainerLogin,
     rememberMe,
-    forceLogin,
     sessionId,
     deviceName,
     recaptchaToken,
   } = req.body;
 
   try {
+    // Verify reCAPTCHA
     const verifyRes = await fetch(
       `https://www.google.com/recaptcha/api/siteverify`,
       {
@@ -210,7 +210,7 @@ app.post("/login", async (req, res) => {
 
     const attemptsRef = db.collection("LoginAttempts").doc(email);
 
-    // check if login is blocked
+    // Check if login is blocked
     if (await isBlocked(email)) {
       return res.status(429).json({
         error: `Too many failed login attempts. Please try again in ${BLOCK_DURATION_MINUTES} minutes.`,
@@ -231,33 +231,10 @@ app.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // 🔓 Successful login, reset failed attempts
+    // Reset failed attempts on successful login
     await attemptsRef.delete().catch(() => {});
 
-    const sessionRef = db.collection("Sessions").doc(userDoc.id);
-    const existingSession = await sessionRef.get();
-
-    if (existingSession.exists && !forceLogin) {
-      return res.status(409).json({
-        error: "Session already active",
-        activeDevice: existingSession.data().deviceName || "another device",
-      });
-    }
-
-    // If forceLogin, remove all other sessions
-    if (forceLogin) {
-      const sessionsSnapshot = await db
-        .collection("Sessions")
-        .where("userId", "==", userDoc.id)
-        .get();
-
-      sessionsSnapshot.forEach((doc) => {
-        if (doc.id !== sessionRef.id) {
-          doc.ref.delete();
-        }
-      });
-    }
-
+    // Create new JWT token
     const token = jwt.sign(
       {
         userId: userDoc.id,
@@ -268,7 +245,8 @@ app.post("/login", async (req, res) => {
       { expiresIn: rememberMe ? "7d" : "1h" }
     );
 
-    // Save new session
+    // Create new session entry (no check for existing session)
+    const sessionRef = db.collection("Sessions").doc(userDoc.id);
     await sessionRef.set({
       userId: userDoc.id,
       profile: userData.profile,
@@ -277,6 +255,7 @@ app.post("/login", async (req, res) => {
       deviceName,
     });
 
+    // Set auth token cookie
     res.cookie("auth_token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
