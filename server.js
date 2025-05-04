@@ -64,6 +64,7 @@ const allowedOrigins = [
   "https://mdrrmo---tpms.firebaseapp.com",
   "http://localhost:3000",
   "http://localhost:5000",
+  "https://mdrrmo-sad-project-backend.onrender.com",
 ];
 
 const SECRET_KEY = process.env.SECRET_KEY || "rammir_key";
@@ -82,10 +83,10 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false,
+      secure: process.env.NODE_ENV === "production", 
       httpOnly: true,
       sameSite: "lax",
-      maxAge: 24 * 60 * 60 * 1000, // 1 day expiration
+      maxAge: 24 * 60 * 60 * 1000,
     },
   })
 );
@@ -321,7 +322,6 @@ const verifyToken = async (req, res, next) => {
 
   const token = req.cookies.auth_token;
   if (!token) {
-    console.log("🚨 No auth token found in request!");
     return res.status(401).json({ error: "Not authenticated" });
   }
 
@@ -1010,15 +1010,15 @@ function getAuthenticatedCalendar(tokens) {
 }
 
 app.get("/check-auth", (req, res) => {
-  console.log("🔍 Checking authentication session...");
-  console.log("Full Session Data:", req.session); // para sa hayop na debug
-
   if (req.session.tokens) {
     console.log("✅ User is authenticated. Tokens exist.");
     return res.json({ authenticated: true });
   }
 
   console.log("❌ No authentication tokens found.");
+  console.log("🔍 Headers:", req.headers);
+  console.log("🔍 Cookies:", req.cookies);
+
   res.json({ authenticated: false });
 });
 
@@ -1037,6 +1037,8 @@ app.get("/auth/google", (req, res) => {
 app.get("/auth/google/callback", async (req, res) => {
   try {
     const { code } = req.query;
+    console.log("Using redirect URI:", process.env.REDIRECT_URI);
+
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
@@ -1087,12 +1089,17 @@ app.post("/sync-google-calendar", async (req, res) => {
           },
         });
 
-        console.log(`✅ Event ${index + 1}/${events.length} synced: ${event.title}`);
+        console.log(
+          `✅ Event ${index + 1}/${events.length} synced: ${event.title}`
+        );
 
         // Wait 200ms between each request to avoid rate limits
         await new Promise((resolve) => setTimeout(resolve, 200));
       } catch (eventError) {
-        console.error(`❌ Failed to sync event "${event.title}":`, eventError.message);
+        console.error(
+          `❌ Failed to sync event "${event.title}":`,
+          eventError.message
+        );
       }
     }
 
@@ -1103,7 +1110,6 @@ app.post("/sync-google-calendar", async (req, res) => {
     res.status(500).json({ message: "Failed to sync events", error });
   }
 });
-
 
 //attendance
 
