@@ -1074,28 +1074,36 @@ app.post("/sync-google-calendar", async (req, res) => {
 
     const calendar = getAuthenticatedCalendar(req.session.tokens);
 
-    // put all events from calendar
-    const eventPromises = events.map((event) =>
-      calendar.events.insert({
-        calendarId: "primary",
-        resource: {
-          summary: event.title,
-          location: event.location || "N/A",
-          description: event.description,
-          start: { dateTime: event.startTime, timeZone: "Asia/Manila" },
-          end: { dateTime: event.endTime, timeZone: "Asia/Manila" },
-        },
-      })
-    );
+    for (const [index, event] of events.entries()) {
+      try {
+        await calendar.events.insert({
+          calendarId: "primary",
+          resource: {
+            summary: event.title,
+            location: event.location || "N/A",
+            description: event.description,
+            start: { dateTime: event.startTime, timeZone: "Asia/Manila" },
+            end: { dateTime: event.endTime, timeZone: "Asia/Manila" },
+          },
+        });
 
-    await Promise.all(eventPromises);
-    console.log(`✅ Successfully synced ${events.length} events`);
+        console.log(`✅ Event ${index + 1}/${events.length} synced: ${event.title}`);
+
+        // Wait 200ms between each request to avoid rate limits
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch (eventError) {
+        console.error(`❌ Failed to sync event "${event.title}":`, eventError.message);
+      }
+    }
+
+    console.log(`✅ Finished syncing ${events.length} events`);
     res.status(200).json({ message: "Events synced successfully" });
   } catch (error) {
     console.error("❌ Error syncing events:", error);
     res.status(500).json({ message: "Failed to sync events", error });
   }
 });
+
 
 //attendance
 
