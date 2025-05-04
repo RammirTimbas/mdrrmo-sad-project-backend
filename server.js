@@ -261,8 +261,8 @@ app.post("/login", async (req, res) => {
     // Set auth token cookie
     res.cookie("auth_token", token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "Lax",
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
       maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
     });
 
