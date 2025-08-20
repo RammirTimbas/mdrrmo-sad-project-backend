@@ -77,7 +77,7 @@ app.use(
   })
 );
 
-const isProd = process.env.NODE_ENV === 'production';
+const isProd = process.env.NODE_ENV === "production";
 
 app.set("trust proxy", 1);
 
@@ -89,7 +89,7 @@ app.use(
     cookie: {
       secure: isProd,
       httpOnly: true,
-      sameSite: isProd ? 'none' : 'lax',
+      sameSite: isProd ? "none" : "lax",
       maxAge: 24 * 60 * 60 * 1000,
     },
   })
@@ -264,7 +264,7 @@ app.post("/login", async (req, res) => {
     res.cookie("auth_token", token, {
       httpOnly: true,
       secure: isProd,
-      sameSite: isProd ? 'none' : 'lax',
+      sameSite: isProd ? "none" : "lax",
       maxAge: rememberMe ? 7 * 24 * 60 * 60 * 1000 : 1 * 60 * 60 * 1000,
     });
 
@@ -1118,106 +1118,123 @@ app.post("/sync-google-calendar", async (req, res) => {
 //attendance
 
 app.post("/download-attendance", async (req, res) => {
+  console.log("🚀 /download-attendance endpoint HIT");
   try {
-    console.log("📥 Received request to generate attendance report");
+    let { allUsersAttendance, dateRange, program } = req.body;
 
-    let { approvedApplicants, dateRange, program } = req.body;
-
-    if (!approvedApplicants && program?.approved_applicants) {
-      approvedApplicants = Object.values(program.approved_applicants);
-    }
+    // Use allUsersAttendance if provided, otherwise fallback to program.approved_applicants map
+    let approvedApplicants =
+      Array.isArray(allUsersAttendance) && allUsersAttendance.length > 0
+        ? allUsersAttendance
+        : program?.approved_applicants
+        ? Object.values(program.approved_applicants)
+        : [];
 
     if (!approvedApplicants || !dateRange || !program) {
-      console.error("❌ Missing required data:");
-      if (!approvedApplicants)
-        console.error("⛔ approvedApplicants is missing!");
-      if (!dateRange) console.error("⛔ dateRange is missing!");
-      if (!program) console.error("⛔ program is missing!");
+      console.error("❌ Missing required data!");
       return res.status(400).json({ error: "Missing required data" });
     }
 
-    console.log(
-      "🔍 Extracted approvedApplicants:",
-      JSON.stringify(approvedApplicants, null, 2)
-    );
-
-    const userIds = approvedApplicants.map((applicant) => applicant.user_id);
-    console.log("🔍 Querying Firestore for user details:", userIds);
-
-    const userDetails = {};
-    const userDocs = await db
-      .collection("User Informations")
-      .where("user_ID", "in", userIds)
-      .get();
-
-    userDocs.forEach((doc) => {
-      userDetails[doc.data().user_ID] = doc.data();
+    // ---- Date helpers ----
+    const fmtManila = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
     });
 
-    console.log(
-      "✅ Retrieved User Information:",
-      JSON.stringify(userDetails, null, 2)
-    );
-
-    // only 5 dates are stored
-    const formattedDates = dateRange.slice(0, 5).map((date, index) => {
-      const validDate = new Date(date);
-      if (isNaN(validDate.getTime())) {
-        console.error("❌ Invalid date format detected:", date);
-        throw new Error("Invalid date format received");
+    const toYMDManila = (d) => {
+      if (!d) return "";
+      if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+      let jsDate = d;
+      if (
+        typeof d === "object" &&
+        d !== null &&
+        typeof d.seconds === "number"
+      ) {
+        jsDate = new Date(d.seconds * 1000);
+      } else {
+        jsDate = new Date(d);
       }
+      const parts = fmtManila.formatToParts(jsDate);
+      const y = parts.find((p) => p.type === "year").value;
+      const m = parts.find((p) => p.type === "month").value;
+      const day = parts.find((p) => p.type === "day").value;
+      return `${y}-${m}-${day}`;
+    };
 
-      return {
-        key: `date${index + 1}`,
-        value: validDate.toLocaleDateString("en-CA"),
-      };
-    });
+    // ---- Normalize dates ----
+    const formattedDates = dateRange.map((date, index) => ({
+      key: `date${index + 1}`,
+      value: toYMDManila(date) || "", // blank if invalid
+    }));
 
-    console.log("✅ Fixed Formatted Dates:", formattedDates);
-
-    const attendees = approvedApplicants.map((applicant, index) => {
-      let remarks = {};
-
-      formattedDates.forEach((dateObj, i) => {
-        let status = "No Data";
-
-        if (applicant.attendance) {
-          for (const attendanceDate in applicant.attendance) {
-            if (
-              new Date(
-                applicant.attendance[attendanceDate].date
-              ).toLocaleDateString("en-CA") === dateObj.value
-            ) {
-              status = applicant.attendance[attendanceDate].remark;
-              break;
-            }
-          }
-        }
-
-        remarks[`remark${i + 1}`] = status === "present" ? "Present" : "Absent";
+    // ---- Fetch user details from Firestore ----
+    const userIds = approvedApplicants.map((a) => a.user_id).filter(Boolean);
+    const userDetails = {};
+    if (userIds.length) {
+      const userDocs = await db
+        .collection("User Informations")
+        .where("user_ID", "in", userIds)
+        .get();
+      userDocs.forEach((doc) => {
+        userDetails[doc.data().user_ID] = doc.data();
       });
-      //merge data here
-      const userInfo = userDetails[applicant.user_id] || {};
+    }
 
+    // ---- Normalize attendance ----
+    const normalizeRemark = (val) => {
+      if (!val) return "";
+      const v = String(val).trim().toLowerCase();
+      if (v === "present") return "Present";
+      if (v === "absent") return "Absent";
+      return "";
+    };
+
+    const getStatusForDate = (attendance, ymd) => {
+      if (!attendance) return "";
+      if (Array.isArray(attendance)) {
+        const rec = attendance.find((r) => toYMDManila(r?.date) === ymd);
+        return normalizeRemark(rec?.remark);
+      }
+      if (typeof attendance === "object") {
+        if (attendance[ymd] !== undefined)
+          return normalizeRemark(attendance[ymd]);
+        for (const rec of Object.values(attendance)) {
+          if (toYMDManila(rec?.date) === ymd)
+            return normalizeRemark(rec?.remark);
+        }
+      }
+      return "";
+    };
+
+    // ---- Build attendees ----
+    const attendees = approvedApplicants.map((applicant, index) => {
+      const remarks = {};
+      formattedDates.forEach((dateObj, i) => {
+        remarks[`remark${i + 1}`] = dateObj.value
+          ? getStatusForDate(applicant.attendance, dateObj.value)
+          : "";
+      });
+
+      const info = userDetails[applicant.user_id] || {};
       return {
         index: index + 1,
         full_name: applicant.full_name || "Unknown",
-        gender: userInfo.gender || "N/A",
-        age: userInfo.age || "N/A",
-        civil_status: userInfo.civil_status || "N/A",
-        cellphone_no: userInfo.mobile_number || "N/A",
-        agency_office: userInfo.school_agency || "N/A",
-        barangay: userInfo.barangay || "N/A",
-        municipality: userInfo.municipality || "N/A",
-        province: userInfo.province || "N/A",
+        gender: info.gender || "N/A",
+        age: info.age || "N/A",
+        civil_status: info.civil_status || "N/A",
+        cellphone_no: info.mobile_number || "N/A",
+        agency_office: info.school_agency || "N/A",
+        barangay: info.barangay || "N/A",
+        municipality: info.municipality || "N/A",
+        province: info.province || "N/A",
         ...remarks,
       };
     });
 
-    console.log("✅ Attendees Data:", JSON.stringify(attendees, null, 2));
-
+    // ---- Load DOCX template ----
     const templatePath = path.join(__dirname, "attendance_temp_final.docx");
-
     if (!fs.existsSync(templatePath)) {
       console.error("❌ Template file not found:", templatePath);
       return res.status(500).json({ error: "Template file not found" });
@@ -1227,16 +1244,20 @@ app.post("/download-attendance", async (req, res) => {
     const zip = new PizZip(content);
     const doc = new Docxtemplater(zip);
 
-    // put data to template
+    const startYMD = program?.start_date
+      ? toYMDManila(program.start_date * 1000)
+      : "";
+    const endYMD = program?.end_date
+      ? toYMDManila(program.end_date * 1000)
+      : "";
+
     doc.setData({
-      program_name: program.program_title || "Unknown Program",
-      trainer_name: program.trainer_assigned || "Unknown Trainer",
-      start_date: new Date(program.start_date * 1000).toLocaleDateString(),
-      end_date: new Date(program.end_date * 1000).toLocaleDateString(),
-      ...Object.fromEntries(
-        formattedDates.map((dateObj) => [dateObj.key, dateObj.value])
-      ),
-      attendees: attendees,
+      program_name: program.program_title || "",
+      trainer_name: program.trainer_assigned || "",
+      start_date: startYMD,
+      end_date: endYMD,
+      ...Object.fromEntries(formattedDates.map((d) => [d.key, d.value])),
+      attendees,
     });
 
     doc.render();
@@ -1245,15 +1266,14 @@ app.post("/download-attendance", async (req, res) => {
     const filePath = path.join(__dirname, "Attendance_Report.docx");
     fs.writeFileSync(filePath, buffer);
 
-    console.log("📤 Sending file to frontend...");
-
     res.download(filePath, "Attendance_Report.docx", (err) => {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (_) {}
       if (err) {
         console.error("❌ Error sending file:", err);
         return res.status(500).send("Error downloading file");
       }
-      fs.unlinkSync(filePath); // delete file after sending to frontend
-      console.log("File successfully sent and deleted from server.");
     });
   } catch (error) {
     console.error("❌ An error occurred:", error);
@@ -1951,5 +1971,5 @@ function formatTrainingsList(trainings) {
 }
 
 server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server is running on portable ${PORT}`);
 });
