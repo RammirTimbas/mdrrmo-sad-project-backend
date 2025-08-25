@@ -591,40 +591,104 @@ app.get("/programs", async (req, res) => {
   }
 });
 
-//TRAINING PROGRAMS VIEW
-
+// TRAINING PROGRAMS VIEW
 app.get("/training-programs", async (req, res) => {
   try {
-    const now = Date.now();
-    const nowSeconds = Math.floor(now / 1000);
+    const now = Math.floor(Date.now() / 1000);
 
-    // fetch cached data if availabel
-    if (
-      trainingProgramsCache &&
-      cacheTimestamp &&
-      now - cacheTimestamp < CACHE_DURATION
-    ) {
-      console.log("Serving training programs from cache");
-      return res.status(200).json(trainingProgramsCache);
-    }
+    // Manila day boundaries (UTC+8, no DST)
+    const MANILA_OFFSET = 8 * 60 * 60; // seconds
+    const todayStart =
+      Math.floor((now + MANILA_OFFSET) / 86400) * 86400 - MANILA_OFFSET;
+    const todayEnd = todayStart + 86399;
 
-    // Fetch only relevant documents from Firestore
-    const programsSnapshot = await db
-      .collection("Training Programs")
-      .where("end_date", ">=", nowSeconds)
-      .where("start_date", ">", nowSeconds)
-      .get();
+    const twoDaysAgo = now - 2 * 24 * 60 * 60; // 2 days in seconds
 
-    const programsData = programsSnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
+    const programsSnapshot = await db.collection("Training Programs").get();
 
-    // Update the cache
-    trainingProgramsCache = programsData;
-    cacheTimestamp = Date.now();
+    const programsData = programsSnapshot.docs.map((doc) => {
+      const data = doc.data();
 
-    console.log("Serving fresh training programs data and updating cache");
+      let startTs = null;
+      let endTs = null;
+      let temporalStatus;
+
+      // Handle specific dates
+      if (
+        data.dateMode === "specific" &&
+        Array.isArray(data.selected_dates) &&
+        data.selected_dates.length > 0
+      ) {
+        const dateSecs = data.selected_dates
+          .map((d) =>
+            typeof d === "number" ? Math.floor(d / 1000) : d?.seconds ?? null
+          )
+          .filter((s) => typeof s === "number")
+          .map((s) => {
+            // snap to Manila day start
+            return (
+              Math.floor((s + MANILA_OFFSET) / 86400) * 86400 - MANILA_OFFSET
+            );
+          })
+          .sort((a, b) => a - b);
+
+        if (dateSecs.length) {
+          startTs = dateSecs[0];
+          endTs = dateSecs[dateSecs.length - 1]; // ✅ latest date only
+
+          if (endTs < todayStart) {
+            temporalStatus = "ended";
+          } else if (startTs > todayEnd) {
+            temporalStatus = "upcoming";
+          } else if (startTs <= todayEnd && endTs >= todayStart) {
+            temporalStatus = "ongoing";
+          }
+        }
+      }
+
+      // Handle range dates
+      else if (data.dateMode === "range") {
+        startTs = typeof data.start_date === "number" ? data.start_date : null;
+        endTs =
+          typeof data.end_date === "number" ? data.end_date : startTs ?? null;
+
+        if (startTs != null && endTs != null) {
+          if (endTs < todayStart) {
+            temporalStatus = "ended";
+          } else if (startTs > todayEnd) {
+            temporalStatus = "upcoming";
+          } else {
+            temporalStatus = "ongoing";
+          }
+        }
+      }
+
+      let status = temporalStatus;
+
+      // Capacity check (only if not ended)
+      if (
+        data.slots !== undefined &&
+        Number(data.slots) <= 0 &&
+        status !== "ended"
+      ) {
+        status = "slots_full";
+      }
+
+      // Mark as "new" if created within last 2 days (but not ended)
+      const createdAtSec = data.createdAt?.seconds ?? null;
+      if (createdAtSec && createdAtSec >= twoDaysAgo && status !== "ended") {
+        status = "new";
+      }
+
+      return {
+        id: doc.id,
+        ...(status ? { status } : {}),
+        startTs,
+        endTs,
+        ...data,
+      };
+    });
+
     res.status(200).json(programsData);
   } catch (error) {
     console.error("Error fetching training programs:", error);
