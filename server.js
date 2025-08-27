@@ -237,7 +237,7 @@ app.post("/login", async (req, res) => {
     }
 
     // Reset failed attempts on successful login
-    await attemptsRef.delete().catch(() => {});
+    await attemptsRef.delete().catch(() => { });
 
     // Create new JWT token
     const token = jwt.sign(
@@ -424,18 +424,6 @@ const CACHE_DURATION_ENGAGEMENT = 3600000; // 1 hour
 // Engagement data endpoint
 app.get("/api/engagements", async (req, res) => {
   try {
-    const currentTime = Date.now();
-
-    // check if cached data is available and valid
-    if (
-      ratedtrainingProgramsCache &&
-      cacheTimestamp &&
-      currentTime - cacheTimestamp < CACHE_DURATION_ENGAGEMENT
-    ) {
-      console.log("Serving from cache");
-      return res.json(ratedtrainingProgramsCache);
-    }
-
     console.log("Fetching data from Firestore");
     const programsSnapshot = await db.collection("Training Programs").get();
     const ratedProgramsData = [];
@@ -480,16 +468,13 @@ app.get("/api/engagements", async (req, res) => {
       }
     }
 
-    // update cache
-    ratedtrainingProgramsCache = ratedProgramsData;
-    cacheTimestamp = currentTime;
-
     res.json(ratedProgramsData);
   } catch (error) {
     console.error("Error fetching ratings:", error);
     res.status(500).json({ error: "Failed to fetch ratings" });
   }
 });
+
 
 // SETTINGS LAYOUT
 
@@ -1191,8 +1176,8 @@ app.post("/download-attendance", async (req, res) => {
       Array.isArray(allUsersAttendance) && allUsersAttendance.length > 0
         ? allUsersAttendance
         : program?.approved_applicants
-        ? Object.values(program.approved_applicants)
-        : [];
+          ? Object.values(program.approved_applicants)
+          : [];
 
     if (!approvedApplicants || !dateRange || !program) {
       console.error("❌ Missing required data!");
@@ -1333,7 +1318,7 @@ app.post("/download-attendance", async (req, res) => {
     res.download(filePath, "Attendance_Report.docx", (err) => {
       try {
         fs.unlinkSync(filePath);
-      } catch (_) {}
+      } catch (_) { }
       if (err) {
         console.error("❌ Error sending file:", err);
         return res.status(500).send("Error downloading file");
@@ -1772,9 +1757,8 @@ const sendAlertEmail = async (error) => {
     from: `"Server Watchdog" <${GMAIL_USER}>`,
     to: ALERT_RECEIVER,
     subject: "Server Ping Failed!",
-    text: `Ping to ${SERVER_URL} failed.\n\nError: ${
-      error.message
-    }\nTime: ${new Date().toLocaleString()}`,
+    text: `Ping to ${SERVER_URL} failed.\n\nError: ${error.message
+      }\nTime: ${new Date().toLocaleString()}`,
   };
 
   try {
@@ -2027,9 +2011,8 @@ function formatTrainingsList(trainings) {
 
   let formatted = "Here are the available trainings:\n\n";
   trainings.forEach((t, index) => {
-    formatted += `${index + 1}. ${t.title}\nVenue: ${t.venue}\nDate: ${
-      t.start_date
-    } - ${t.end_date}\nTrainer: ${t.trainer}\nSlots Available: ${t.slots}\n\n`;
+    formatted += `${index + 1}. ${t.title}\nVenue: ${t.venue}\nDate: ${t.start_date
+      } - ${t.end_date}\nTrainer: ${t.trainer}\nSlots Available: ${t.slots}\n\n`;
   });
   return formatted;
 }
