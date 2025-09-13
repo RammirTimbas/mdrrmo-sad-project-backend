@@ -42,6 +42,7 @@ const {
   TableRow,
   TableCell,
   WidthType,
+  TextRun,
 } = require("docx");
 
 const {
@@ -1882,6 +1883,88 @@ async function getAvailableTrainings(location = "", date = "", type = "") {
     throw new Error("Error fetching available training programs.");
   }
 }
+
+
+app.post("/export-report", async (req, res) => {
+  try {
+    const { fileName, format, title, adminName, todayDate, rows } = req.body;
+
+    if (format !== "docx") {
+      return res.status(400).json({ error: "Only DOCX supported for template export" });
+    }
+
+    // Load Word template
+    const templatePath = path.join(__dirname, "report-template-programs.docx");
+    const content = fs.readFileSync(templatePath, "binary");
+
+    const zip = new PizZip(content);
+    const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+
+    // Inject values
+    doc.render({
+      TITLE: title,
+      ADMIN_NAME: adminName,
+      TODAY_DATE: todayDate,
+      rows: rows,
+    });
+
+    const buf = doc.getZip().generate({ type: "nodebuffer" });
+
+    res.setHeader("Content-Disposition", `attachment; filename=${fileName}.docx`);
+    res.send(buf);
+  } catch (e) {
+    console.error("Error exporting report:", e);
+    res.status(500).send("Failed to generate report");
+  }
+});
+
+app.post("/export-participant-report", async (req, res) => {
+  try {
+    const { fileName, title, adminName, todayDate, participants } = req.body;
+
+    if (!fileName || !participants) {
+      return res.status(400).json({ error: "fileName and participants are required" });
+    }
+
+    // Load template
+    const templatePath = path.join(__dirname, "report-template-participants.docx");
+    const content = fs.readFileSync(templatePath, "binary");
+
+    const zip = new PizZip(content);
+    const doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+    });
+
+    // Transform participants into rows expected by template
+    const rows = participants.map((p, i) => ({
+      index: i + 1,
+      name: p.name || "-",
+      age: p.age || "-",
+      gender: p.gender || "-",
+      civil_status: p.civil_status || "-",
+      municipality: p.municipality || "-",
+      barangay: p.barangay || "-",
+      programs: (p.programs || []).join(", "),
+    }));
+
+    // Inject variables into template
+    doc.render({
+      TITLE: title || "Participant Report",
+      ADMIN_NAME: adminName || "Administrator",
+      TODAY_DATE: todayDate || new Date().toLocaleDateString(),
+      rows: rows,
+    });
+
+    const buf = doc.getZip().generate({ type: "nodebuffer" });
+
+    res.setHeader("Content-Disposition", `attachment; filename=${fileName}.docx`);
+    res.send(buf);
+  } catch (e) {
+    console.error("Error exporting participant report:", e);
+    res.status(500).send("Failed to generate participant report");
+  }
+});
 
 const context = require("./ai-context.json");
 
