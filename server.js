@@ -26,6 +26,8 @@ const { readFile, writeFile } = require("fs/promises");
 const { v4: uuidv4 } = require("uuid");
 const cron = require("node-cron");
 const axios = require("axios");
+const sanitize = require("sanitize-filename");
+
 
 const nodemailer = require("nodemailer");
 
@@ -1894,7 +1896,7 @@ app.post("/export-report", async (req, res) => {
     }
 
     // Load Word template
-    const templatePath = path.join(__dirname, "report-template-programs.docx");
+    const templatePath = path.join(__dirname, "report-template-logs.docx");
     const content = fs.readFileSync(templatePath, "binary");
 
     const zip = new PizZip(content);
@@ -1965,6 +1967,73 @@ app.post("/export-participant-report", async (req, res) => {
     res.status(500).send("Failed to generate participant report");
   }
 });
+
+app.post("/export-logs", async (req, res) => {
+  try {
+    const { fileName, title, adminName, todayDate, logs, remarks } = req.body;
+
+    if (!fileName || !Array.isArray(logs)) {
+      return res.status(400).json({ error: "fileName and logs array are required" });
+    }
+
+    const safeFileName = (sanitize(String(fileName)) || "logs_report").replace(/\s+/g, "_");
+    const templatePath = path.join(__dirname, "report-template-logs.docx");
+    if (!fs.existsSync(templatePath)) {
+      return res.status(500).json({ error: "DOCX template (report-template-logs.docx) not found on server." });
+    }
+
+    const content = fs.readFileSync(templatePath, "binary");
+    const zip = new PizZip(content);
+    const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+
+    const formatDate = (d) => {
+      if (!d) return "";
+      const dt = typeof d === "string" || typeof d === "number" ? new Date(d) : d;
+      if (isNaN(dt)) return String(d);
+      return new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(dt).replace(/(\w{3})\s/, "$1. ");
+    };
+
+    const rows = logs.map((lg, idx) => ({
+      index: idx + 1,
+      admin_name: lg.name ?? lg.adminName ?? lg.admin_name ?? "-",
+      type: lg.type ?? "-",
+      action: lg.action ?? "-",
+      date: lg.date ? formatDate(lg.date) : (lg.createdAt ? formatDate(lg.createdAt) : ""),
+    }));
+
+
+    try {
+      doc.render({
+        TITLE: title || "Logs Report",
+        ADMIN_NAME: adminName || "Administrator",
+        TODAY_DATE: todayDate || new Date().toLocaleDateString(),
+        rows,
+        remarks: remarks || "-", // ✅ inject global remarks here
+      });
+
+    } catch (err) {
+      console.error("Docxtemplater render error:", err);
+      if (err.properties?.errors) {
+        return res.status(400).json({ error: "Template render error", details: err.properties.errors });
+      }
+      return res.status(500).json({ error: "Template render failed", message: err.message || String(err) });
+    }
+
+    const buf = doc.getZip().generate({ type: "nodebuffer" });
+    res.setHeader("Content-Disposition", `attachment; filename=${safeFileName}.docx`);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    return res.send(buf);
+  } catch (error) {
+    console.error("Error exporting logs:", error);
+    return res.status(500).json({ error: "Failed to generate logs report", message: error.message });
+  }
+});
+
+
 
 const context = require("./ai-context.json");
 
